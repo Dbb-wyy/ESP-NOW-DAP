@@ -16,7 +16,7 @@ flashed on each of the two boards**.
 
 | Role | Sits next to | USB | Target pins | ESP-NOW |
 |---|---|---|---|---|
-| `Wired` | everything in one chip | CDC + vendor bulk + MSC | UART, JTAG/SWD, BOOT/RST | unused |
+| `Wired` | everything in one chip | CDC + vendor bulk + MSC | UART, SWD, BOOT/RST | unused |
 | `Wireless host` | the PC | CDC (serial) + vendor bulk (CMSIS-DAP) | none | relays both streams |
 | `Wireless slave` | the target board | **none** | UART, SWD (SWCLK/SWDIO), BOOT/RST | terminates both streams |
 
