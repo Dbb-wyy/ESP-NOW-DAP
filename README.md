@@ -11,7 +11,7 @@ This project is derived from Espressif's [ESP USB Bridge](https://github.com/esp
 
 The concept of the wired bridge is shown in the following figure.
 
-![ESP-NOW-DAP concept](images/concept.png)
+![ESP-NOW-DAP concept](images/concept.svg)
 
 ESP-NOW-DAP creates a composite USB device accessible from the PC when they are connected
 through a USB cable. The main features are the following.
