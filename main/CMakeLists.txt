@@ -1,4 +1,19 @@
+set(srcs
+    "main.c"
+    "eub_vendord.c"
+    "serial_bridge.c"
+    "usb_phy.c"
+    "bridge_glue.c"
+)
+
 set(dependencies "tinyusb" "esp_timer" "usb" "util" "serial_handler" "debug_probe" "esp_ringbuf")
+
+if(CONFIG_BRIDGE_ROLE_WIRED)
+    # The mass storage / UF2 interface only exists in the wired build.
+    list(APPEND srcs "msc.c")
+else()
+    list(APPEND dependencies "wireless_link")
+endif()
 
 # Starting from esp-idf v5.3, the GPIO driver is moved to a separate component
 if("${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}" VERSION_GREATER_EQUAL "5.3")
@@ -7,11 +22,7 @@ else()
     list(APPEND dependencies "driver")
 endif()
 
-idf_component_register(SRCS "main.c"
-                            "msc.c"
-                            "eub_vendord.c"
-                            "serial_bridge.c"
-                            "usb_phy.c"
+idf_component_register(SRCS ${srcs}
                        REQUIRES ${dependencies}
                        LDFRAGMENTS "noflash.lf"
                        INCLUDE_DIRS "." "public_include")

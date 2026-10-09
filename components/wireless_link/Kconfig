@@ -1,0 +1,27 @@
+menu "Wireless Link Configuration"
+
+    config WLINK_CHANNEL
+        int "Wi-Fi channel used by the bridge link"
+        range 1 13
+        default 1
+        help
+            Both devices of a wireless bridge pair must use the same channel.
+            The channel is fixed at start-up instead of following the station
+            configuration, so the link also works when no access point is around.
+
+    config WLINK_SWD_TIMEOUT_MS
+        int "CMSIS-DAP response timeout (ms)"
+        default 250
+        help
+            How long the wireless host waits for a DAP response from the slave
+            before retransmitting the request.
+
+    config WLINK_SWD_RETRIES
+        int "CMSIS-DAP request retransmissions"
+        range 1 10
+        default 3
+        help
+            Number of times a DAP request is (re)sent before the relay gives up.
+            Giving up lets OpenOCD time out and retry at a higher level.
+
+endmenu

@@ -6,6 +6,8 @@
 
 # pragma once
 
+#include "sdkconfig.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -25,7 +27,12 @@ extern "C" {
 #define CFG_TUD_CDC_RX_BUFSIZE      64
 #define CFG_TUD_CDC_TX_BUFSIZE      64
 
+#if CONFIG_BRIDGE_ROLE_WIRED
 #define CFG_TUD_MSC                 1
+#else
+/* No mass storage in the wireless roles, see usb_defs.h. */
+#define CFG_TUD_MSC                 0
+#endif
 #define CFG_TUD_MSC_BUFSIZE         512
 
 #define CFG_TUD_VENDOR              0

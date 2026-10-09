@@ -5,27 +5,35 @@
  */
 
 #include <stdlib.h>
+#include "sdkconfig.h"
 #include "util.h"
 #include "esp_log.h"
+#include "esp_cpu.h"
+#include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "tusb.h"
-#include "msc.h"
-#include "serial_handler.h"
 #include "serial_bridge.h"
-#include "rom/gpio.h"
-#include "driver/gpio.h"
-#include "sdkconfig.h"
+#include "bridge_glue.h"
 #include "esp_mac.h"
 #include "eub_vendord.h"
-#include "debug_probe.h"
 #include "usb_defs.h"
 #include "usb_phy.h"
 #include "led_io.h"
 
+#if CONFIG_BRIDGE_ROLE_WIRED
+#include "msc.h"
+#endif
+
 static const char *TAG = "bridge_main";
 
+#if CONFIG_BRIDGE_ROLE_WIRED
 #define TUSB_DESC_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_VENDOR_DESC_LEN + TUD_MSC_DESC_LEN)
+#else
+/* The wireless host does not expose a mass storage disk: flashing happens over the
+   serial tunnel with the host esptool, so there is nothing to drag an UF2 onto. */
+#define TUSB_DESC_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_VENDOR_DESC_LEN)
+#endif
 
 static const tusb_desc_device_t descriptor_config = {
     .bLength = sizeof(descriptor_config),
@@ -73,8 +81,10 @@ static uint8_t const desc_configuration[] = {
     // Interface number, string index, EP Out & IN address, EP size
     TUD_VENDOR_EUB_DESCRIPTOR(ITF_NUM_VENDOR, EUB_VENDORD_IFACE_STR_IDX, EPNUM_VENDOR, 0x80 | EPNUM_VENDOR, 64),
 
+#if CONFIG_BRIDGE_ROLE_WIRED
     // Interface number, string index, EP Out & EP In address, EP size
     TUD_MSC_DESCRIPTOR(ITF_NUM_MSC, 6, EPNUM_MSC, 0x80 | EPNUM_MSC, 64),
+#endif
 };
 
 #define MAC_BYTES       6
@@ -101,7 +111,7 @@ static char const *string_desc_arr[] = {
 
 // BOS Descriptor with Microsoft OS 2.0 support
 static uint8_t const desc_bos[] = {
-    // total length, number of device caps
+    // total length, number of device capabilities
     TUD_BOS_DESCRIPTOR(BOS_TOTAL_LEN, 1),
 
     // Microsoft OS 2.0 descriptor
@@ -123,23 +133,18 @@ uint8_t const *tud_descriptor_device_cb(void)
     return (uint8_t const *) &descriptor_config;
 }
 
-static void debug_activity_callback(bool active)
-{
-    gpio_set_level(LED_JTAG, active ? LED_JTAG_ON : LED_JTAG_OFF);
-}
-
 void tud_mount_cb(void)
 {
     ESP_LOGI(TAG, "Mounted");
 
-    esp_err_t debug_result = debug_probe_init();
+    esp_err_t debug_result = bridge_probe_init();
     if (debug_result != ESP_OK) {
         ESP_LOGW(TAG, "Debug probe initialization failed: %s", esp_err_to_name(debug_result));
         eub_abort();
     }
 
     eub_vendord_start();
-    debug_probe_register_activity_callback(debug_activity_callback);
+    bridge_probe_register_activity_callback(bridge_led_debug);
 }
 
 static void init_serial_no(void)
@@ -165,7 +170,7 @@ uint16_t const *tud_descriptor_string_cb(const uint8_t index, const uint16_t lan
         memcpy(&_desc_str[1], string_desc_arr[0], 2);
         chr_count = 1;
     } else if (index == DEBUG_PROBE_STR_DESC_INX) {
-        chr_count = debug_probe_get_proto_caps(&_desc_str[1]) / 2;
+        chr_count = bridge_probe_get_proto_caps(&_desc_str[1]) / 2;
     } else {
         // Convert ASCII string into UTF-16
 
@@ -200,21 +205,10 @@ static void tusb_device_task(void *pvParameters)
     vTaskDelete(NULL);
 }
 
-// LEDs TX and RX are swapped in the code to indicate activity from the bridge to the target
-static void serial_tx_activity_callback(bool active)
-{
-    gpio_set_level(LED_RX, active ? LED_RX_ON : LED_RX_OFF);
-}
-
-static void serial_rx_activity_callback(bool active)
-{
-    gpio_set_level(LED_TX, active ? LED_TX_ON : LED_TX_OFF);
-}
-
 static void init_led_gpios(void)
 {
     gpio_config_t io_conf = {};
-    io_conf.intr_type = GPIO_PIN_INTR_DISABLE;
+    io_conf.intr_type = GPIO_INTR_DISABLE;
     io_conf.mode = GPIO_MODE_OUTPUT;
     io_conf.pin_bit_mask = (1ULL << CONFIG_BRIDGE_GPIO_LED1) | (1ULL << CONFIG_BRIDGE_GPIO_LED2) |
                            (1ULL << CONFIG_BRIDGE_GPIO_LED3);
@@ -229,23 +223,42 @@ static void init_led_gpios(void)
     ESP_LOGI(TAG, "LED GPIO init done");
 }
 
+#if !CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE
+static void start_usb_device(void)
+{
+    ESP_ERROR_CHECK(eub_usb_phy_init());
+
+    ESP_ERROR_CHECK(serial_bridge_init());
+
+    tusb_init();
+
+#if CONFIG_BRIDGE_ROLE_WIRED
+    msc_init();
+#endif
+
+    // dedic_gpio bundles are CPU-local; task must run on the same core that created them
+    xTaskCreatePinnedToCore(tusb_device_task, "tusb_device_task", 4 * 1024, NULL, 5, NULL, esp_cpu_get_core_id());
+}
+#endif
+
 void app_main(void)
 {
     init_led_gpios(); // Keep this at the beginning. LEDs are used for error reporting.
 
     init_serial_no();
 
-    ESP_ERROR_CHECK(eub_usb_phy_init());
+    /* bridge_uplink_init() picks the transport for the compiled role: the local target
+       UART in wired/slave mode, the ESP-NOW link in the wireless modes. */
+    ESP_ERROR_CHECK(bridge_uplink_init());
 
-    ESP_ERROR_CHECK(serial_handler_init(TRANSPORT_TYPE_UART));
-    serial_handler_register_tx_activity_callback(serial_tx_activity_callback);
-    serial_handler_register_rx_activity_callback(serial_rx_activity_callback);
-
-    ESP_ERROR_CHECK(serial_bridge_init());
-
-    tusb_init();
-    msc_init();
-
-    // dedic_gpio bundles are CPU-local; task must run on the same core that created them
-    xTaskCreatePinnedToCore(tusb_device_task, "tusb_device_task", 4 * 1024, NULL, 5, NULL, esp_cpu_get_core_id());
+#if CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE
+    /* Target side: no USB at all, the ESP-NOW link is the only host interface. */
+    ESP_ERROR_CHECK(bridge_wireless_slave_start());
+    ESP_LOGI(TAG, "ESP USB Bridge running as wireless slave (UART + SWD over ESP-NOW)");
+#else
+    start_usb_device();
+  #if CONFIG_BRIDGE_ROLE_WIRELESS_HOST
+    ESP_LOGI(TAG, "ESP USB Bridge running as wireless host (USB <-> ESP-NOW)");
+  #endif
+#endif
 }

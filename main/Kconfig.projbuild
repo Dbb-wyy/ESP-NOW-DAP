@@ -1,5 +1,32 @@
 menu "Bridge Configuration"
 
+    choice BRIDGE_ROLE
+        prompt "Bridge role"
+        default BRIDGE_ROLE_WIRED
+        help
+            Select which end of the bridge this firmware implements.
+
+            Wired: a single chip carrying both ends, USB on one side and the target
+            UART/JTAG/SWD plus the mass storage disk on the other.
+
+            Wireless host: sits next to the PC. USB CDC and the CMSIS-DAP bulk
+            interface are tunnelled over ESP-NOW to a wireless slave.
+
+            Wireless slave: sits next to the target. Drives the target UART, the
+            BOOT/RST pins and the CMSIS-DAP/SWD pins from the ESP-NOW link.
+
+            Both wireless roles require "Debug Probe Configuration -> CMSIS-DAP SWD".
+
+        config BRIDGE_ROLE_WIRED
+            bool "Wired (USB only)"
+
+        config BRIDGE_ROLE_WIRELESS_HOST
+            bool "Wireless host (USB <-> ESP-NOW)"
+
+        config BRIDGE_ROLE_WIRELESS_SLAVE
+            bool "Wireless slave (ESP-NOW <-> target UART + SWD)"
+    endchoice
+
     config BRIDGE_USB_VID
         hex "USB vendor ID"
         default 0x303A

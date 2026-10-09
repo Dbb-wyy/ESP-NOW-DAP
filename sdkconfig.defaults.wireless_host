@@ -1,0 +1,7 @@
+# Wireless host: sits next to the PC, tunnels USB CDC + CMSIS-DAP over ESP-NOW.
+# Board pins / flash come from sdkconfig.defaults.esp32s3.
+# Build with:
+#   idf.py -B build_host -D SDKCONFIG=sdkconfig.host \
+#          -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.wireless_host" build
+CONFIG_BRIDGE_ROLE_WIRELESS_HOST=y
+CONFIG_WLINK_CHANNEL=1

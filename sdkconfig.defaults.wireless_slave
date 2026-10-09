@@ -1,0 +1,13 @@
+# Wireless slave: sits next to the target, drives its UART, BOOT/RST and SWD pins
+# from the ESP-NOW link. This side does not use the USB OTG peripheral.
+# Board pins / flash come from sdkconfig.defaults.esp32s3.
+# Build with:
+#   idf.py -B build_slave -D SDKCONFIG=sdkconfig.slave \
+#          -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.wireless_slave" build
+CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE=y
+CONFIG_WLINK_CHANNEL=1
+
+# No USB device is mounted on this side, so nothing resets the task watchdog on CPU1.
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=n
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
