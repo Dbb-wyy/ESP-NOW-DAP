@@ -3,3 +3,18 @@ managed_components/
 sdkconfig
 sdkconfig.old
 dependencies.lock
+
+# Per-role build directories and their generated sdkconfig files.
+# The tracked sources are sdkconfig.defaults.wireless_host / _wireless_slave.
+build_wired/
+build_host/
+build_slave/
+sdkconfig.wired
+sdkconfig.host
+sdkconfig.slave
+
+# CI configuration is kept locally only: the workflows referenced Espressif's
+# internal Jira/Launchpad/danger infrastructure and do not apply to this fork.
+# .gitlab-ci.yml is tracked-but-ignored, see `git rm --cached` in the history.
+.github/
+.gitlab-ci.yml

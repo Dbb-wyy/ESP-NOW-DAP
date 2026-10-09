@@ -11,20 +11,22 @@ DEFAULT:
   license_for_new_files: Apache-2.0  # license to be used when inserting a new copyright notice
   new_notice_c: |  # notice for new C, CPP, H, HPP and LD files
     /*
-     * SPDX-FileCopyrightText: {years} Espressif Systems (Shanghai) CO LTD
+     * SPDX-FileCopyrightText: {years} Dbb
      *
      * SPDX-License-Identifier: {license}
      */
   new_notice_python: |  # notice for new python files
-    # SPDX-FileCopyrightText: {years} Espressif Systems (Shanghai) CO LTD
+    # SPDX-FileCopyrightText: {years} Dbb
     # SPDX-License-Identifier: {license}
 
-  # comment lines matching:
-  # SPDX-FileCopyrightText: year[-year] Espressif Systems
-  # or
-  # SPDX-FileContributor: year[-year] Espressif Systems
-  # are replaced with this template prefixed with the correct comment notation (# or // or *) and SPDX- notation
-  espressif_copyright: '{years} Espressif Systems (Shanghai) CO LTD'
+  # Comment lines matching this pattern are replaced with the template above.
+  #
+  # It is deliberately set to this project's own holder rather than to Espressif:
+  # the files inherited from ESP USB Bridge keep their original Espressif Systems
+  # notices, and components/debug_probe/DAP/ keeps its ARM Limited notices. The
+  # Apache-2.0 license requires those notices to stay in place, so the hook must
+  # never rewrite them.
+  espressif_copyright: '{years} Dbb'
 
 ignore:  # You can also select ignoring files here
   perform_check: no  # Don't check files from that block
