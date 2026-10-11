@@ -20,8 +20,9 @@ extern "C" {
  *
  * The link is deliberately tiny: a 4 byte header, a role based peer discovery and a
  * per-message-type dispatch table. Two devices form a pair when they run the opposite
- * roles; both beacon until they have learned the peer MAC and then switch to unicast,
- * which gives hardware ACK/retransmission from ESP-NOW itself.
+ * roles. Both keep sending a short broadcast beacon forever, so that either side can
+ * rediscover the other after a reset; once the peer MAC is known, payload traffic
+ * switches to unicast, which gives hardware ACK/retransmission from ESP-NOW itself.
  */
 
 /** Maximum ESP-NOW v1 payload minus our header. */
@@ -30,7 +31,7 @@ extern "C" {
 /** Size of the fixed link header prepended to every message. */
 #define WLINK_HDR_LEN       4
 
-/** Beacons sent until the peer is discovered. */
+/** Beacon period. Beacons are sent for the lifetime of the link, see above. */
 #define WLINK_BEACON_INTERVAL_MS 1000
 
 typedef enum {

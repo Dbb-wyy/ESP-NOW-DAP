@@ -73,11 +73,14 @@ typedef struct __attribute__((packed)) {
 ```
 
 * **Discovery** — both sides broadcast a beacon every second (`WLINK_MSG_BEACON`,
-  empty payload) until they learn the peer MAC. A frame is only accepted when its
+  empty payload), for the lifetime of the link. A frame is only accepted when its
   `role` field differs from the local role, so two hosts cannot hijack a slave.
-* **Delivery** — once discovered, all traffic switches to unicast, which gives
-  ESP-NOW's hardware ACK and retransmission. Before that, frames go to broadcast
-  and may be lost, which only affects start-up traffic.
+  Beaconing is never stopped: a peer that reboots forgets us and can only rediscover
+  us from a frame we send, so stopping would leave it unpaired until we happened to
+  have payload for it.
+* **Delivery** — payload traffic goes to unicast once the peer MAC is known, which
+  gives ESP-NOW's hardware ACK and retransmission. Before that, frames go to broadcast
+  and may be lost; that only affects start-up traffic, and a slave still receives them.
 * **Chunking** — payloads larger than `WLINK_MAX_PAYLOAD` (246 B) are split into
   consecutive frames, so a 2 KB UART burst from the target arrives intact.
 * **Channel** — fixed at start-up (`CONFIG_WLINK_CHANNEL`, default 1) instead of
@@ -97,6 +100,11 @@ relay adds a small amount of protocol on top of the link.
 
 * `tud_vendor` OUT data is queued (non-blocking) so the TinyUSB task is never
   blocked by link latency.
+* Before sending, the relay waits up to `CONFIG_WLINK_PEER_WAIT_MS` for the link to
+  pair. A board that was just reset does not know its peer yet, while the host tool
+  sends its first command as soon as the USB device enumerates and gives up if that
+  command goes unanswered. After the wait the request is sent anyway (as a broadcast,
+  which the slave still receives) rather than being dropped.
 * One request is in flight at a time (stop-and-wait): send, wait
   `CONFIG_WLINK_SWD_TIMEOUT_MS`, retransmit up to `CONFIG_WLINK_SWD_RETRIES` times.
 * Every request carries a sequence number. A response is only accepted when its
@@ -104,6 +112,10 @@ relay adds a small amount of protocol on top of the link.
   request are dropped instead of being handed to OpenOCD out of order.
 * If all retries fail, nothing is returned on the USB IN endpoint and OpenOCD
   times out and retries. A late answer is dropped by the `seq` check above.
+* State changes are logged at info level. Per packet detail stays at debug level,
+  because a debug session can send hundreds of DAP commands per second and the
+  console is much slower than that; `CONFIG_WLINK_SWD_VERBOSE_LOG` promotes it to
+  info level when the path has to be diagnosed.
 
 **Slave side** (`bridge_slave_swd_rx` in `main/bridge_glue.c`)
 

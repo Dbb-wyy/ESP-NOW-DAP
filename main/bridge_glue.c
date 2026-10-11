@@ -41,6 +41,21 @@ static const char *TAG = "bridge_glue";
 /* Maximum DAP packet on the wire, matches DAP_PACKET_SIZE / EUB_VENDORD_EPSIZE. */
 #define BRIDGE_SWD_PKT_SIZE 64
 
+/* How often the host relay re-checks the link while it waits for the peer. */
+#define BRIDGE_PEER_POLL_MS 100
+
+/*
+ * Per packet logging on the SWD path. It stays at debug level by default, because a
+ * debug session can send hundreds of DAP commands per second and the serial console is
+ * far slower than that; CONFIG_WLINK_SWD_VERBOSE_LOG promotes it to info level when the
+ * path has to be diagnosed. State changes and anomalies are logged unconditionally.
+ */
+#if CONFIG_WLINK_SWD_VERBOSE_LOG
+#define BRIDGE_SWD_PKT_LOG(fmt, ...) ESP_LOGI(TAG, fmt, ##__VA_ARGS__)
+#else
+#define BRIDGE_SWD_PKT_LOG(fmt, ...) ESP_LOGD(TAG, fmt, ##__VA_ARGS__)
+#endif
+
 /* =================================================================== status LEDs */
 
 void bridge_led_serial_tx(bool active)
@@ -174,12 +189,14 @@ static void bridge_slave_swd_rx(const wlink_hdr_t *hdr, const uint8_t *payload, 
     if (s_swd_last_valid && hdr->seq == s_swd_last_seq) {
         /* The host missed our answer: reply from the cache instead of running the
            DAP command a second time, which could double-apply a register write. */
+        BRIDGE_SWD_PKT_LOG("DAP request seq %u served from the cache (retransmit)", hdr->seq);
         wlink_send(WLINK_MSG_SWD, 0, s_swd_last_seq, s_swd_last_resp, s_swd_last_resp_len);
         return;
     }
 
     if (hdr->seq == s_swd_pending_seq) {
         /* Already being processed, the response will be sent as soon as it is ready. */
+        BRIDGE_SWD_PKT_LOG("DAP request seq %u is already in flight, ignored", hdr->seq);
         return;
     }
 
@@ -202,6 +219,9 @@ static void bridge_slave_swd_rx(const wlink_hdr_t *hdr, const uint8_t *payload, 
     if (xQueueSend(s_swd_req_q, &req, 0) != pdTRUE) {
         s_swd_pending_seq = previous_pending;
         ESP_LOGW(TAG, "SWD request queue full, dropping seq %u", hdr->seq);
+    } else {
+        BRIDGE_SWD_PKT_LOG("DAP request seq %u received over the link (%u bytes), queued",
+                           hdr->seq, (unsigned)req.len);
     }
 }
 
@@ -242,6 +262,9 @@ static void bridge_slave_swd_tx_task(void *arg)
 
             if (wlink_send(WLINK_MSG_SWD, 0, s_swd_last_seq, s_swd_last_resp, n) != ESP_OK) {
                 ESP_LOGW(TAG, "Cannot send DAP response seq %u", s_swd_last_seq);
+            } else {
+                BRIDGE_SWD_PKT_LOG("DAP response seq %u sent over the link (%u bytes)",
+                                   s_swd_last_seq, (unsigned)n);
             }
         }
 
@@ -325,8 +348,8 @@ static void bridge_host_swd_rx(const wlink_hdr_t *hdr, const uint8_t *payload, s
     }
 
     if (hdr->seq != s_host_swd_tx_seq) {
-        ESP_LOGD(TAG, "Late DAP response for seq %u (waiting for %u), dropped",
-                 hdr->seq, s_host_swd_tx_seq);
+        BRIDGE_SWD_PKT_LOG("Late DAP response for seq %u (waiting for %u), dropped",
+                           hdr->seq, s_host_swd_tx_seq);
         return;
     }
 
@@ -338,6 +361,7 @@ static void bridge_host_swd_rx(const wlink_hdr_t *hdr, const uint8_t *payload, s
         return;
     }
 
+    BRIDGE_SWD_PKT_LOG("DAP response seq %u arrived over the link (%u bytes)", hdr->seq, (unsigned)n);
     bridge_led_debug(false);
     xSemaphoreGive(s_host_swd_resp_sem);
 }
@@ -345,39 +369,71 @@ static void bridge_host_swd_rx(const wlink_hdr_t *hdr, const uint8_t *payload, s
 static void bridge_host_swd_relay_task(void *arg)
 {
     bridge_host_swd_req_t req;
+    bool reported_wait = false;
 
     while (1) {
         if (xQueueReceive(s_host_swd_q, &req, portMAX_DELAY) != pdTRUE) {
             continue;
         }
 
+        /*
+         * A board that was just reset does not know its peer yet, while the host tool
+         * sends its very first command as soon as the USB device enumerates and gives
+         * up if that command goes unanswered. So wait for the link to pair instead of
+         * dropping the request: a paired link lets the request go out as a unicast
+         * frame, which ESP-NOW acknowledges and retries on its own.
+         */
+        if (!wlink_peer_ready()) {
+            if (!reported_wait) {
+                ESP_LOGI(TAG, "Link is not paired yet, waiting up to %d ms for the peer",
+                         CONFIG_WLINK_PEER_WAIT_MS);
+                reported_wait = true;
+            }
+
+            int waited = 0;
+            while (waited < CONFIG_WLINK_PEER_WAIT_MS && !wlink_peer_ready()) {
+                vTaskDelay(pdMS_TO_TICKS(BRIDGE_PEER_POLL_MS));
+                waited += BRIDGE_PEER_POLL_MS;
+            }
+
+            if (wlink_peer_ready()) {
+                ESP_LOGI(TAG, "Link paired again after waiting %d ms", waited);
+                reported_wait = false;
+            }
+        }
+
         const uint8_t seq = wlink_next_seq();
         s_host_swd_tx_seq = seq;
 
+        /*
+         * Even without a peer the frame is still sent, as a broadcast, which the slave
+         * receives as well. So fall through here rather than dropping the request.
+         */
         bool delivered = false;
         for (int attempt = 0; attempt < CONFIG_WLINK_SWD_RETRIES; attempt++) {
-            if (!wlink_peer_ready()) {
-                ESP_LOGW(TAG, "No wireless peer yet, dropping the DAP request");
-                break;
-            }
-
             if (wlink_send(WLINK_MSG_SWD, 0, seq, req.data, req.len) != ESP_OK) {
                 ESP_LOGW(TAG, "Cannot send the DAP request seq %u", seq);
                 continue;
             }
+
+            BRIDGE_SWD_PKT_LOG("DAP request seq %u sent (%u bytes, attempt %d%s)",
+                               seq, (unsigned)req.len, attempt + 1,
+                               wlink_peer_ready() ? "" : ", broadcast, link unpaired");
 
             if (xSemaphoreTake(s_host_swd_resp_sem, pdMS_TO_TICKS(CONFIG_WLINK_SWD_TIMEOUT_MS)) == pdTRUE) {
                 delivered = true;
                 break;
             }
 
-            ESP_LOGD(TAG, "DAP request seq %u timed out, attempt %d", seq, attempt + 1);
+            BRIDGE_SWD_PKT_LOG("DAP request seq %u timed out, attempt %d", seq, attempt + 1);
         }
 
         if (!delivered) {
             /* Let the USB side time out instead of inventing a DAP answer. A late
                response is dropped by the sequence check above. */
-            ESP_LOGW(TAG, "DAP request seq %u was not answered, letting the host retry", seq);
+            ESP_LOGW(TAG, "DAP request seq %u was not answered after %d attempts, link is %s",
+                     seq, CONFIG_WLINK_SWD_RETRIES,
+                     wlink_peer_ready() ? "paired" : "still unpaired");
             bridge_led_debug(false);
         }
     }
@@ -563,6 +619,7 @@ esp_err_t bridge_probe_process_data(const uint8_t *data, size_t len)
         return ESP_ERR_NO_MEM;
     }
 
+    BRIDGE_SWD_PKT_LOG("DAP request from USB queued (%u bytes)", (unsigned)len);
     bridge_led_debug(true);
     return ESP_OK;
 }

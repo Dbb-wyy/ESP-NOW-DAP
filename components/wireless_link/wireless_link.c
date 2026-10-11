@@ -64,12 +64,21 @@ static void wlink_learn_peer(const uint8_t mac[ESP_NOW_ETH_ALEN])
     memcpy(s_peer_mac, mac, ESP_NOW_ETH_ALEN);
     s_peer_ready = true;
 
-    if (s_beacon_timer) {
-        esp_timer_stop(s_beacon_timer);
-    }
-
-    ESP_LOGI(TAG, "Peer discovered: " MACSTR " (peer role: %s)", MAC2STR(s_peer_mac),
-             s_role == WLINK_ROLE_HOST ? "slave" : "host");
+    /*
+     * Keep beaconing once the peer is known.
+     *
+     * A peer that reboots forgets us, and it can only rediscover us from a frame
+     * that we send. Stopping the beacons here left such a peer unpaired until we
+     * happened to have payload for it, which is exactly the case right after a
+     * reset when nothing is being typed into the serial port yet.
+     *
+     * One small broadcast frame per second costs nothing next to the traffic the
+     * link carries once it is in use, and it makes either side recover from a
+     * reset on its own.
+     */
+    ESP_LOGI(TAG, "Peer discovered: " MACSTR " (peer role: %s), still beaconing every %d ms",
+             MAC2STR(s_peer_mac), s_role == WLINK_ROLE_HOST ? "slave" : "host",
+             WLINK_BEACON_INTERVAL_MS);
 }
 
 /* Runs in the Wi-Fi task: this must not block. */

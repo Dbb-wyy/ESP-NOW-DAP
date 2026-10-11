@@ -24,4 +24,31 @@ menu "Wireless Link Configuration"
             Number of times a DAP request is (re)sent before the relay gives up.
             Giving up lets OpenOCD time out and retry at a higher level.
 
+    config WLINK_PEER_WAIT_MS
+        int "How long the wireless host waits for the link to pair (ms)"
+        default 2000
+        help
+            A board that has just been reset does not know its peer yet, while the
+            host tool sends its first command as soon as the USB device enumerates
+            and gives up if that command is not answered. Before sending a DAP
+            request the relay waits up to this long for the link to pair, so the
+            request can go out as an acknowledged unicast frame.
+
+            After the wait the request is still sent (as a broadcast, which the
+            slave receives as well), so this only trades a little latency at
+            start-up for reliability.
+
+    config WLINK_SWD_VERBOSE_LOG
+        bool "Log every CMSIS-DAP packet on the SWD path at info level"
+        default n
+        help
+            Logs each DAP request, each retransmission, each cache hit and each
+            response at info level instead of debug level.
+
+            Useful when diagnosing the wireless SWD path, because the host board's
+            console is not always easy to reach. Keep it off for normal use: a debug
+            session with a live watch can send hundreds of DAP commands per second,
+            and the serial console is far slower than that, so the logging itself
+            would slow the link down.
+
 endmenu
