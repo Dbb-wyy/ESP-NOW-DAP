@@ -51,4 +51,25 @@ menu "Wireless Link Configuration"
             and the serial console is far slower than that, so the logging itself
             would slow the link down.
 
+    config WLINK_DEBUG_LINK_TEST
+        bool "Debug: send a link test line from the slave every second"
+        default n
+        depends on !BRIDGE_ROLE_WIRED
+        help
+            Debug aid for the wireless link itself.
+
+            When enabled, the wireless slave sends the text "connected N" (N counting
+            up from 1) to the host once per second, as soon as it has discovered its
+            peer. The line travels as WLINK_MSG_SERIAL, so it takes exactly the same
+            path as the tunnelled UART data: it shows up on the serial port of the USB
+            side and is also logged on the slave console.
+
+            A silent serial port therefore means the link is not paired (or the slave
+            is not sending), while one line per second proves the whole path, not just
+            the radio. Turn this off for normal use: the test text is injected into the
+            UART tunnel and the log costs one line per second.
+
+            Only the slave sends; enabling it on the host build only reports that the
+            host has nothing to send.
+
 endmenu

@@ -12,20 +12,27 @@
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "bridge_glue.h"
+#include "led_io.h"
+
+#if !CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE
+/* USB device stack headers: only the wired and wireless-host builds use them. */
 #include "tusb.h"
 #include "serial_bridge.h"
-#include "bridge_glue.h"
 #include "esp_mac.h"
 #include "eub_vendord.h"
 #include "usb_defs.h"
 #include "usb_phy.h"
-#include "led_io.h"
+#endif
 
 #if CONFIG_BRIDGE_ROLE_WIRED
 #include "msc.h"
 #endif
 
 static const char *TAG = "bridge_main";
+
+#if !CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE
+/* USB descriptors and tinyusb callbacks: wired and wireless host only. */
 
 #if CONFIG_BRIDGE_ROLE_WIRED
 #define TUSB_DESC_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_VENDOR_DESC_LEN + TUD_MSC_DESC_LEN)
@@ -205,6 +212,8 @@ static void tusb_device_task(void *pvParameters)
     vTaskDelete(NULL);
 }
 
+#endif /* !CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE */
+
 static void init_led_gpios(void)
 {
     gpio_config_t io_conf = {};
@@ -245,7 +254,9 @@ void app_main(void)
 {
     init_led_gpios(); // Keep this at the beginning. LEDs are used for error reporting.
 
+#if !CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE
     init_serial_no();
+#endif
 
     /* bridge_uplink_init() picks the transport for the compiled role: the local target
        UART in wired/slave mode, the ESP-NOW link in the wireless modes. */

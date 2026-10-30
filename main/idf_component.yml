@@ -1,4 +1,10 @@
 ## IDF Component Manager Manifest File
 dependencies:
   idf: ">=5.0"
-  espressif/tinyusb: "^0.18.0~2"
+  # tinyusb is only used by the wired and wireless-host roles, which need a USB OTG
+  # device controller. Targets without one (ESP32-C3/C6) only build the wireless
+  # slave, so the dependency is not resolved there.
+  espressif/tinyusb:
+    version: "^0.18.0~2"
+    rules:
+      - if: "target in [esp32s2, esp32s3]"

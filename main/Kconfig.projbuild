@@ -2,7 +2,8 @@ menu "Bridge Configuration"
 
     choice BRIDGE_ROLE
         prompt "Bridge role"
-        default BRIDGE_ROLE_WIRED
+        default BRIDGE_ROLE_WIRED if SOC_USB_OTG_SUPPORTED
+        default BRIDGE_ROLE_WIRELESS_SLAVE
         help
             Select which end of the bridge this firmware implements.
 
@@ -15,13 +16,19 @@ menu "Bridge Configuration"
             Wireless slave: sits next to the target. Drives the target UART, the
             BOOT/RST pins and the CMSIS-DAP/SWD pins from the ESP-NOW link.
 
+            Wired and wireless host need a USB OTG device controller, so they are
+            only offered on targets that have one (ESP32-S2/S3/P4/H4). Targets
+            without USB OTG (ESP32-C3/C6, ...) only offer the wireless slave.
+
             Both wireless roles require "Debug Probe Configuration -> CMSIS-DAP SWD".
 
         config BRIDGE_ROLE_WIRED
             bool "Wired (USB only)"
+            depends on SOC_USB_OTG_SUPPORTED
 
         config BRIDGE_ROLE_WIRELESS_HOST
             bool "Wireless host (USB <-> ESP-NOW)"
+            depends on SOC_USB_OTG_SUPPORTED
 
         config BRIDGE_ROLE_WIRELESS_SLAVE
             bool "Wireless slave (ESP-NOW <-> target UART + SWD)"

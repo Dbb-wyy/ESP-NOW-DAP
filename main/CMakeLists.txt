@@ -1,12 +1,17 @@
 set(srcs
     "main.c"
-    "eub_vendord.c"
-    "serial_bridge.c"
-    "usb_phy.c"
     "bridge_glue.c"
 )
 
-set(dependencies "tinyusb" "esp_timer" "usb" "util" "serial_handler" "debug_probe" "esp_ringbuf")
+set(dependencies "esp_timer" "util" "serial_handler" "debug_probe" "esp_ringbuf")
+
+# The USB device stack (tinyusb + vendor bulk + CDC) only exists on the PC-facing
+# roles, wired and wireless host. The wireless slave has no USB at all, which is
+# what lets it build for targets without a USB OTG controller (ESP32-C3/C6).
+if(NOT CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE)
+    list(APPEND srcs "eub_vendord.c" "serial_bridge.c" "usb_phy.c")
+    list(APPEND dependencies "tinyusb" "usb")
+endif()
 
 if(CONFIG_BRIDGE_ROLE_WIRED)
     # The mass storage / UF2 interface only exists in the wired build.
@@ -22,13 +27,29 @@ else()
     list(APPEND dependencies "driver")
 endif()
 
+# noflash.lf only places eub_vendord in IRAM; that object is not built for the slave.
+set(ldfragments)
+if(NOT CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE)
+    set(ldfragments "noflash.lf")
+endif()
+
 idf_component_register(SRCS ${srcs}
                        REQUIRES ${dependencies}
-                       LDFRAGMENTS "noflash.lf"
+                       LDFRAGMENTS ${ldfragments}
                        INCLUDE_DIRS "." "public_include")
 
-idf_component_get_property(tusb_lib espressif__tinyusb COMPONENT_LIB)
-target_include_directories(${tusb_lib} PRIVATE public_include)
+# main/public_include/tusb_config.h is tinyusb's configuration header. tinyusb is
+# pulled in by idf_component.yml for USB-capable targets only (S2/S3), and the
+# component manager resolves that per TARGET, not per role: on S3 the component is
+# part of every build, including the wireless slave one. Whenever it is present it
+# must be able to find this header, so the include path is added regardless of the
+# role. The slave build has no USB code of its own and nothing references tinyusb,
+# so the library is built but never linked into the image.
+idf_build_get_property(build_components BUILD_COMPONENTS)
+if("espressif__tinyusb" IN_LIST build_components)
+    idf_component_get_property(tusb_lib espressif__tinyusb COMPONENT_LIB)
+    target_include_directories(${tusb_lib} PRIVATE public_include)
+endif()
 
 idf_build_get_property(project_ver PROJECT_VER)
 if(project_ver)

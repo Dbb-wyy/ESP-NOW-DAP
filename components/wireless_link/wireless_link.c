@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <stdio.h>
 #include <string.h>
 
 #include "sdkconfig.h"
@@ -18,6 +19,7 @@
 #include "esp_mac.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 
 #include "wireless_link.h"
 
@@ -33,6 +35,10 @@ static uint8_t s_peer_mac[ESP_NOW_ETH_ALEN];
 static volatile bool s_peer_ready;
 static uint8_t s_seq;
 static esp_timer_handle_t s_beacon_timer;
+
+#if CONFIG_WLINK_DEBUG_LINK_TEST
+static esp_err_t wlink_start_debug_task(void);
+#endif
 
 static esp_err_t wlink_add_peer(const uint8_t mac[ESP_NOW_ETH_ALEN])
 {
@@ -175,6 +181,13 @@ esp_err_t wlink_init(wlink_role_t role)
     ESP_LOGI(TAG, "Link up as %s, mac " MACSTR ", channel %d",
              role == WLINK_ROLE_HOST ? "HOST" : "SLAVE", MAC2STR(own_mac), CONFIG_WLINK_CHANNEL);
 
+#if CONFIG_WLINK_DEBUG_LINK_TEST
+    err = wlink_start_debug_task();
+    if (err != ESP_OK) {
+        return err;
+    }
+#endif
+
     return ESP_OK;
 }
 
@@ -234,6 +247,78 @@ esp_err_t wlink_send(wlink_msg_type_t type, uint8_t sub, uint8_t seq, const void
 
     return result;
 }
+
+#if CONFIG_WLINK_DEBUG_LINK_TEST
+
+/*
+ * Link self test.
+ *
+ * Diagnosing the bridge over ESP-NOW is awkward, because neither board's console shows
+ * what the other one sees. With CONFIG_WLINK_DEBUG_LINK_TEST the slave therefore sends a
+ * tiny "connected N" line once per second once it has discovered its peer. The line
+ * travels as WLINK_MSG_SERIAL, so it follows exactly the same path as the tunnelled UART
+ * data and shows up on the serial port of the USB side: that makes it an end to end
+ * check of the link, not just of the radio. The value of N counts the lines sent since
+ * start-up and never resets.
+ *
+ * A dedicated task is used instead of an esp_timer callback, because wlink_send() takes
+ * the transmit mutex and esp_timer callbacks must never block.
+ */
+#define WLINK_DEBUG_PERIOD_MS 1000
+
+#if !CONFIG_BRIDGE_ROLE_WIRELESS_HOST
+
+static void wlink_debug_task(void *arg)
+{
+    (void)arg;
+    int counter = 0;
+
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(WLINK_DEBUG_PERIOD_MS));
+
+        if (!s_peer_ready) {
+            continue;   /* nothing to test as long as the peer has not been discovered */
+        }
+
+        char msg[32];
+        int len = snprintf(msg, sizeof(msg), "connected %d\r\n", ++counter);
+        if (len <= 0) {
+            continue;
+        }
+        if (len > (int)sizeof(msg) - 1) {
+            len = (int)sizeof(msg) - 1;
+        }
+
+        esp_err_t err = wlink_send(WLINK_MSG_SERIAL, 0, 0, msg, (size_t)len);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Link test: connected %d", counter);
+        } else {
+            ESP_LOGW(TAG, "Link test: cannot send the line: %s", esp_err_to_name(err));
+        }
+    }
+}
+
+#endif /* !CONFIG_BRIDGE_ROLE_WIRELESS_HOST */
+
+static esp_err_t wlink_start_debug_task(void)
+{
+#if CONFIG_BRIDGE_ROLE_WIRELESS_HOST
+    /* The host side only relays what the slave sends, so there is nothing to start. */
+    ESP_LOGI(TAG, "Link test is enabled, but only the wireless slave sends it; "
+             "the host side has nothing to send");
+    return ESP_OK;
+#else
+    if (xTaskCreate(wlink_debug_task, "wlink_debug", 3 * 1024, NULL, 3, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "Cannot start the link test task");
+        return ESP_ERR_NO_MEM;
+    }
+
+    ESP_LOGI(TAG, "Link test: sending \"connected N\" once per second once the peer is known");
+    return ESP_OK;
+#endif
+}
+
+#endif /* CONFIG_WLINK_DEBUG_LINK_TEST */
 
 bool wlink_peer_ready(void)
 {

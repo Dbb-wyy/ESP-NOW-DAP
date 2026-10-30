@@ -65,6 +65,13 @@
 
 格式：日期/阶段 · 现象 · 根因 · 教训 · 修正。
 
+### E4（2026-10-31 · 阶段1 · USB 按角色条件编译）
+
+- **现象**：S3 wireless slave 构建失败于 managed_components/espressif__tinyusb/src/tusb_option.h:245:12: fatal error: tusb_config.h: No such file or directory。
+- **根因**：idf_component.yml 的 rules 只按 target / idf_version 求值，不认 role。S3 从机构建的 target 仍是 esp32s3，tinyusb 照样进构建图并被编译；而它的配置头 include 路径原先写在 if(NOT CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE) 里，从机时没被加到 tinyusb 目标上。tusb_config.h 实际在 main/public_include/，不在 managed_components 里。
+- **教训**：① 「从机不需要 USB」只在**链接期**成立，构建图上 managed 依赖仍按 target 存在；给第三方组件补 include/宏定义时，一律用「该组件是否在 BUILD_COMPONENTS 中」判断，不要用 role 判断。② 反向验证法：若 role 不是 slave，main 会 REQUIRES tinyusb 并自行加 include 路径 — 报错本身即证明 role=slave 且组件由 manifest 拉入。
+- **修正**：main/CMakeLists.txt 改用 idf_build_get_property(build_components BUILD_COMPONENTS) + if("espressif__tinyusb" IN_LIST build_components) 后再 target_include_directories(${tusb_lib} PRIVATE public_include)，与角色解耦。
+
 ### E1（2026-10-31 · 文档编写）
 
 - **现象**：用 run_code 生成 Plan.md 时抛 `Identifier cannot follow number` 解析错误。

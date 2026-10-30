@@ -1,12 +1,13 @@
 # END_nightly 移植计划：从机多目标（C6/C3/S3）+ 保留 wired/host（S3）
 
-> 修订 v3 —— 依据用户澄清调整：
+> 修订 v4 —— 依据用户澄清调整：
 > 1. 强调词「!从机!」= 强调从机，而非「仅从机」。
 > 2. END_nightly **保留全部三个角色**（wired / wireless host / wireless slave）；wired 与 host **仅兼容 S3**，不做 C6/C3；**slave 兼容 C6/C3/S3**。
 > 3. 「我」= 用户。**agent 只写代码/文档，禁止编译、烧录、运行任何测试**；每个阶段结束由用户验证，通过后方可进入下一阶段。
 > 4. 已复核 R1–R5「原样拷贝」：功能上成立，但有三处需注意（见 §2 检查结果）。
 > 5. END_nightly 是已 git init 的 idf 项目；阶段 0 把源仓库文件导入其中，用其自身 git 记录（不保留源仓库 git 历史）。
 > 6. tinyusb 条件范围保留 target in [esp32s2, esp32s3]。
+> 7. （m00266）新增调试宏 `CONFIG_WLINK_DEBUG_LINK_TEST`：ESP-NOW 配对后，从机每秒向主机发送 `connected N`（N 持续递增），用于定位链路问题；默认关闭，仅调试时启用。
 
 ---
 
@@ -100,9 +101,12 @@
 2. main/main.c：#if !CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE 包 USB 代码。
 3. main/idf_component.yml：tinyusb 加 rules（target in [esp32s2, esp32s3]）。
 4. main/Kconfig.projbuild：wired/host 加 depends on SOC_USB_OTG_SUPPORTED；角色默认改「有 OTG 则 wired，否则 slave」。
-5. commit（nightly-p1）。
+5. components/wireless_link：新增调试宏 `CONFIG_WLINK_DEBUG_LINK_TEST` + 从机每秒发送 `connected N` 的自检任务（走 WLINK_MSG_SERIAL，见 §阶段1 说明）。
+6. commit（nightly-p1）。
 
 **交付物**：slave 构建不再依赖 USB；wired/host 不变。
+
+**调试宏启用方式**（默认关闭）：`idf.py -B build_slave ... menuconfig` → `Wireless Link Configuration` → *Debug: send a link test line from the slave every second*；或在自己的 defaults 文件里加一行 `CONFIG_WLINK_DEBUG_LINK_TEST=y`。
 
 **用户验证**
 1. S3 wired 构建通过，USB 设备功能照旧（CDC 串口 + SWD/CMSIS-DAP + MSC）。
