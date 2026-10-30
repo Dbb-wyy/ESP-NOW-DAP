@@ -1,7 +1,7 @@
 # END_nightly 移植计划：从机多目标（C6/C3/S3）+ 保留 wired/host（S3）
 
 > 位置：`.agent/Plan.md`（与 `Agent.md`、`Todo.md` 同在 `.agent/`；文中提及的这三个文件名均指该目录下的文件）。
-> 修订 v6 —— 新增第 9 条；按实际代码校正阶段状态、风险表与阶段 2 细则，并清理仓库（用户 m00518）。此前 v5 —— 新增第 8 条与「阶段 1.1」（从机 SWD 首请求丢失修复，用户 m00318/m00346）；v4 —— 依据用户澄清调整：
+> 修订 v8 —— 新增第 11 条（阶段 2 实测体积入档，修正「debug_probe 全量进 IRAM 吃掉余量」的判断）。此前 v7 —— 新增第 10 条（阶段 2 内修正 C6/C3 的 tinyusb 解析失败）；v6 —— 新增第 9 条；按实际代码校正阶段状态、风险表与阶段 2 细则，并清理仓库（用户 m00518）。v5 —— 新增第 8 条与「阶段 1.1」（从机 SWD 首请求丢失修复，用户 m00318/m00346）；v4 —— 依据用户澄清调整：
 > 1. 强调词「!从机!」= 强调从机，而非「仅从机」。
 > 2. END_nightly **保留全部三个角色**（wired / wireless host / wireless slave）；wired 与 host **仅兼容 S3**，不做 C6/C3；**slave 兼容 C6/C3/S3**。
 > 3. 「我」= 用户。**agent 只写代码/文档，禁止编译、烧录、运行任何测试**；每个阶段结束由用户验证，通过后方可进入下一阶段。
@@ -11,6 +11,8 @@
 > 7. （m00266）新增调试宏 `CONFIG_WLINK_DEBUG_LINK_TEST`：ESP-NOW 配对后，从机每秒向主机发送 `connected N`（N 持续递增），用于定位链路问题；默认关闭，仅调试时启用。
 > 8. （m00318）**偏离 §1 R2「bridge_glue 从机侧零改动」**：用户报告「偶见第一次 SWD 烧录失败」，定位到源仓库遗留 bug（从机 `s_swd_pending_seq` 静态初值 0 与主机首个请求 seq 0 相撞，被当作重复请求丢弃，三次重传仍用 seq 0 故首条 DAP 命令必丢）。用户选定方案 B（请求序号 FIFO 关联响应），作为**阶段 1.1 补丁**并入阶段 1 的 gate，改动见下方「阶段 1.1」。
 > 9. （m00518）按实现现状校正本计划：阶段 0/1/1.1 已通过用户验证（`d271245` / `05ab033` / `d8d3afc`）；补充「debug_probe 全量进 IRAM」与「S3 从机仍编译 tinyusb」两条风险；细化阶段 2 的 defaults 清单与体积检查；仓库清理——删除 `test/` 与 `CHANGELOG.md`，`docs/` 转为正常跟踪，`.clangd`/`.cz.toml`/`.gitlab-ci.yml` 保留在盘上但不追踪。
+> 10. （m00688）阶段 2 gate 首次失败：C6 `set-target` 报 `Failed to resolve component 'tinyusb' required by component 'main': unknown name`。根因是 `main/CMakeLists.txt` 把 `tinyusb`/`usb` 写进 `REQUIRES` 时用了角色判断 `if(NOT CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE)`，而组件的 `REQUIRES` 由**早展开**收集（`tools/cmake/scripts/component_get_requirements.cmake`，经 `build.cmake` 的 `__component_get_requirements`），那一趟在 sdkconfig 生成/导入之前运行，`CONFIG_*` 全为空 → 从机也被要求 tinyusb，而 C3/C6 上 `main/idf_component.yml` 的 target 规则让组件管理器根本不提供它。修正：`REQUIRES` 只按 `IDF_TARGET` 判断，源码（`SRCS`）仍按角色判断；经验见 `Agent.md` E6。
+> 11. （m00773）阶段 2 首次成功构建的实测体积入档（见阶段 2「体积数据」）：C3 854,920 B、C6 954,226 B，均落在默认 1MB factory 分区内；同时证伪 v6 加入的风险条目「`debug_probe` 全量进 IRAM 吃掉 C3 余量」——该组件 `text` 合计仅 8,381 B（`libdebug_probe.a` 里 `DAP.c.obj` 3937 + `SW_DP.c.obj` 3042 + `swd.c.obj` 928 + `debug_gpio.c.obj` 460），C3 上落进 `iram0_text` 的只有 7,598 B。风险表随之改写。
 
 ---
 
@@ -151,7 +153,7 @@
 
 ### 阶段 2 —— C3/C6 目标接入（首次跨芯片构建）
 
-**状态**：待开始（前置：阶段 1 / 1.1 已通过）。
+**状态**：已实现（commit `nightly-p2`），待用户验证（前置阶段 1 / 1.1 已通过）。
 
 **改动**
 1. 新增 `sdkconfig.defaults.esp32c6`、`sdkconfig.defaults.esp32c3`，**只写与 target 相关、与角色无关**的项：
@@ -171,8 +173,13 @@
    - `idf.py -B build_c6 set-target esp32c6 && idf.py -B build_c6 build`
    - `idf.py -B build_c3 set-target esp32c3 && idf.py -B build_c3 build`
    - 各跑一次 `idf.py -B build_cX size`，记下 `iram0_text`（debug_probe 全量进 IRAM，见 §5）与 DRAM 余量。
-5. 若用户构建报 target 相关错误，agent 按日志在本阶段内迭代。**预期坑**：`esp-serial-flasher` 依赖 `esp_driver_uart`（`components/serial_handler/CMakeLists.txt` 已按 IDF >= 5.3 分支加入，若仍报缺则在组件里补依赖）、`compiler.h` 硬编码 `xtensa_gcc.h`（RISC-V 下能编过，命名问题留阶段 5）、单核 WDT / IRAM 相关链接错误。
-6. commit（nightly-p2）。
+5. 已核对（无需改代码，供 gate 参考）：`components/debug_probe/debug_gpio.{c,h}` 用到的低层接口在 C3/C6 上都存在——`esp_hal_gpio/esp32c3|c6/include/hal/gpio_ll.h` 提供 `gpio_dev_t`、`GPIO_LL_GET_HW`、`gpio_ll_output_enable/disable`、`gpio_ll_input_enable`、`gpio_ll_set_level`；`dedic_gpio_cpu_ll.h` 提供 `read_in` / `write_mask`（RISC-V CSR 实现）；`soc/gpio_reg.h` 提供 `GPIO_FUNC0_OUT_SEL_CFG_REG`；GPIO 数量 C6 = 31、C3 = 22，本阶段引脚（4/5/6/7/10/11/12/13/14/18/19/20）均在范围内且不与 flash/USB 引脚冲突。
+6. 若用户构建报 target 相关错误，agent 按日志在本阶段内迭代。**预期坑**：`esp-serial-flasher` 依赖 `esp_driver_uart`（`components/serial_handler/CMakeLists.txt` 已按 IDF >= 5.3 分支加入，若仍报缺则在组件里补依赖）、`compiler.h` 硬编码 `xtensa_gcc.h`（RISC-V 下能编过，命名问题留阶段 5）、单核 WDT / IRAM 相关链接错误。
+7. **阶段内修正（m00688，C6/C3 首次 set-target 失败）**：`main/CMakeLists.txt` 把 USB 栈的两类判断拆开——
+   - **源码**（`eub_vendord.c`/`serial_bridge.c`/`usb_phy.c`、`msc.c`）仍按 `CONFIG_BRIDGE_ROLE_*` 判断：`SRCS` 只在该组件真正编译时收集，config 此时已导入，判断有效。
+   - **依赖**（`REQUIRES` 里的 `tinyusb`/`usb`）改为按 target 判断：先用 `IDF_TARGET` 置 `bridge_usb_stack`（S2/S3 为真），再 `if(bridge_usb_stack) list(APPEND dependencies "tinyusb" "usb")`。因为 REQUIRES 在早展开阶段就被读取，那一趟看不到任何 `CONFIG_*`（详见 `Agent.md` E6）。
+   - S3 语义不变：wired / host 照旧拿到源码 + 依赖；slave 不编 USB 源码、但仍 `REQUIRES` tinyusb/usb（与阶段 1 gate 通过时的行为完全一致）。C3/C6 则两者都没有，tinyusb 完全不进构建图。
+8. commit（nightly-p2，含本修正）。
 
 **交付物**：C6、C3 从机固件各可构建；两个 target 的体积数据入档（写进本文件或 Todo.md）。
 
@@ -181,6 +188,22 @@
 2. `idf.py -B build_c3 set-target esp32c3 && idf.py -B build_c3 build` 通过；同上确认角色。
 3. 两次 `idf.py size` 的 `iram0_text` 未把 IRAM 撑满（C3 尤其注意），DRAM 余量正常。
 4. **构建日志里没有 tinyusb 的编译行**（证明 C3/C6 上 USB 栈完全不进图）。
+
+**体积数据（2026-10-31 首次构建实测，用户 m00773）**
+
+| 项 | C3 | C6 | 说明 |
+|---|---|---|---|
+| Total image size（`idf.py size` 报告值） | 854,920 B（834.9 KB） | 954,226 B（931.9 KB） | `bridge.bin` 分别为 855,280 / 954,592 B（含填充） |
+| 占默认 app 分区 | 81.5 % | 91.0 % | 默认 `partitions_singleapp.csv`：`factory` = 1 MB @ 0x10000 |
+| 剩余空间 | 193,656 B（189 KB） | 94,350 B（92 KB） | C6 余量偏薄，见 §5 风险 |
+| `.flash.text` | 642,472 B | 693,726 B | 代码段，主要差异来源 |
+| `.flash.rodata` | 114,916 B | 134,448 B | 常量/字符串 |
+| `.iram0.text` | 83,460 B + 508（`.iram0.text_end`）= 83,968 B（82.0 KB） | 109,948 B（+ `.iram0.data` 4 B）= 109,952 B（107.4 KB） | 远未撑满，链接无告急 |
+| 静态 DRAM（`.dram0.data` + `.dram0.bss`） | 13,764 + 18,024 = 31,788 B（31.0 KB） | 15,832 + 22,432 = 38,264 B（37.4 KB） | 运行期堆由剩余 SRAM 提供 |
+| `debug_probe` 在 IRAM 的实测占用 | 7,598 B | 约同量 | 与 v6 风险条目的「98 KB」直觉差一个量级，见 §5 |
+
+- 角色核对：两份 `build_cX/config/sdkconfig.h` 均为 `CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE 1`；`build_cX/esp-idf/` 下无 `tinyusb` 组件目录，`ldgen_libraries` 中 tinyusb 行数为 0 → USB 栈确实没进图、没链接。
+- 4 MB flash 配置下分区表只用掉 1 MB `factory`，其余约 2.9 MB 空闲；若后续要加设备端日志/双分区，改 `partitions.csv` 即可，不需要动代码。
 
 **通过判据**：两个 target 构建通过 + 体积无告急 + 日志中无 tinyusb。
 
@@ -254,7 +277,8 @@
 | esp-serial-flasher IDF6 依赖 | C3/C6 编译报错 | 阶段 2 内补依赖 |
 | C6 引脚冲突 | 功能异常 | 用 §4 映射避开 8/9/12/13/15 |
 | Kconfig 目标感知默认引入副作用 | S3 上角色默认变化 | 用 SOC_USB_OTG_SUPPORTED 门控：S3 默认仍 wired，行为不变 |
-| `debug_probe` 全量进 IRAM（`components/debug_probe/noflash.lf` 是 `entries: * (noflash)`，ldgen 的 noflash 方案把 `.text` 放 `iram0_text`、`.rodata` 放 `dram0_data`） | C3 单核 IRAM 余量被吃掉，可能链接失败或挤占缓存 | 阶段 2/4 用 `idf.py size` 看 `iram0_text`；必要时把 fragment 收窄到 SWD 位打所需函数 |
+| ~~`debug_probe` 全量进 IRAM 吃掉 C3 余量~~（v8 实测已证伪：该组件 `text` 仅 8,381 B，C3 上落进 `iram0_text` 的是 7,598 B；`components/debug_probe/noflash.lf` 的 `entries: * (noflash)` 仍在，但组件本身很小） | 无实质影响 | C3 实测 `iram0_text` 83,968 B、C6 109,952 B，均宽裕；此条降级为「已核实无需缓解」 |
+| C6 固件已占默认 app 分区 91 %（954,226 / 1,048,576 B，余 92 KB） | 后续若开 JTAG 接口、加日志或引入新组件，可能超出 1 MB 导致链接后无法写入 | 需要扩余量时改 `partitions.csv`（4 MB flash 有约 2.9 MB 未用）；阶段 3/4 调参若引入新代码，先看 `idf.py size` 增量 |
 | S3 从机仍编译 tinyusb（依赖按 target 解析，与角色无关 → 构建时间与 `managed_components` 体积不下降） | 无功能影响（不链接）；C3/C6 不进图 | 记录在案，阶段 5 文档说明 |
 
 - **回滚策略**：每阶段一个 commit；失败回退到上一阶段 commit。
@@ -266,7 +290,7 @@
 
 | 文件 | 改动 |
 |---|---|
-| main/CMakeLists.txt | USB srcs/deps 按「非 slave」条件化；`noflash.lf` 用 `set(ldfragments)` 条件化；tinyusb 的 `public_include` 补全按 `BUILD_COMPONENTS` 判断 |
+| main/CMakeLists.txt | USB **源码**按角色（非 slave）条件化；`tinyusb`/`usb` 的 **REQUIRES 按 target**（`IDF_TARGET`，因早展开看不到 `CONFIG_*`）；`noflash.lf` 用 `set(ldfragments)` 条件化；tinyusb 的 `public_include` 补全按 `BUILD_COMPONENTS` 判断 |
 | main/main.c | #if !CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE 包 USB 代码 |
 | main/idf_component.yml | tinyusb 加 rules（target in [esp32s2, esp32s3]） |
 | main/Kconfig.projbuild | wired/host depends on SOC_USB_OTG_SUPPORTED；角色默认目标感知 |

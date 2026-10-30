@@ -8,8 +8,27 @@ set(dependencies "esp_timer" "util" "serial_handler" "debug_probe" "esp_ringbuf"
 # The USB device stack (tinyusb + vendor bulk + CDC) only exists on the PC-facing
 # roles, wired and wireless host. The wireless slave has no USB at all, which is
 # what lets it build for targets without a USB OTG controller (ESP32-C3/C6).
+#
+# Which sources are compiled is decided by the role; the requirement on tinyusb/usb
+# is decided by the target. The two cannot use the same condition: component
+# requirements are collected by an early CMake expansion pass
+# (tools/cmake/scripts/component_get_requirements.cmake) that runs *before* the
+# sdkconfig is generated and imported, so CONFIG_* values are still empty there. A
+# role check would therefore look like "not the slave" on every build and require
+# tinyusb on C3/C6 as well, where the component manager never provides it (see the
+# target rule in idf_component.yml) -> "Failed to resolve component 'tinyusb'
+# required by component 'main': unknown name". Sources are only collected when the
+# component is really built, so a role check is correct (and visible) for them.
+set(bridge_usb_stack FALSE)
+if(IDF_TARGET STREQUAL "esp32s2" OR IDF_TARGET STREQUAL "esp32s3")
+    set(bridge_usb_stack TRUE)
+endif()
+
 if(NOT CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE)
     list(APPEND srcs "eub_vendord.c" "serial_bridge.c" "usb_phy.c")
+endif()
+
+if(bridge_usb_stack)
     list(APPEND dependencies "tinyusb" "usb")
 endif()
 

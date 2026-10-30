@@ -1,0 +1,33 @@
+# Board defaults for ESP32-C3 (this file is applied automatically for esp32c3 builds).
+# Only target-specific, role-independent settings belong here: the bridge role is
+# left to the Kconfig default, which resolves to wireless slave on this target
+# because the chip has no USB OTG controller.
+#
+# Build with:
+#   idf.py -B build_c3 set-target esp32c3
+#   idf.py -B build_c3 build
+CONFIG_IDF_TARGET="esp32c3"
+
+# Module flash: 4 MB (raise this if the module carries more).
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+
+# Debug probe: CMSIS-DAP over SWD. The USB-JTAG interface is not available on this
+# target, so SWD has to be selected explicitly (the component default is JTAG).
+CONFIG_DEBUG_PROBE_IFACE_SWD=y
+CONFIG_DEBUG_PROBE_GPIO_TCK=10
+CONFIG_DEBUG_PROBE_GPIO_TMS=11
+# TDI/TDO are JTAG-only signals and are not driven in SWD mode, so they keep the
+# component defaults (3/9).
+
+# Target UART and reset lines.
+CONFIG_SERIAL_HANDLER_GPIO_BOOT=6
+CONFIG_SERIAL_HANDLER_GPIO_RST=7
+CONFIG_SERIAL_HANDLER_GPIO_RXD=5
+CONFIG_SERIAL_HANDLER_GPIO_TXD=4
+
+# Status LEDs on 12/13/14: GPIO 2/8/9 are strapping pins and GPIO 18/19 are the
+# USB D-/D+ pins on this chip, so the LEDs stay clear of both.
+CONFIG_BRIDGE_GPIO_LED1=12
+CONFIG_BRIDGE_GPIO_LED2=13
+CONFIG_BRIDGE_GPIO_LED3=14

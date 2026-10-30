@@ -9,6 +9,8 @@ dependencies.lock
 build_wired/
 build_host/
 build_slave/
+build_c6/
+build_c3/
 sdkconfig.wired
 sdkconfig.host
 sdkconfig.slave

@@ -1,6 +1,6 @@
 # Agent.md — END_nightly 开发规则与失败经验
 
-> 版本：v1.1（2026-10-31）
+> 版本：v1.3（2026-10-31）
 > 位置：`.agent/Agent.md`（与 `Plan.md`、`Todo.md` 同在 `.agent/`）。
 > 与 Plan.md 并列，是开发过程的**强制性约束**。
 > 优先级：用户当次指令 > Plan.md / 本文件的明确规则 > 一般工程习惯。
@@ -66,6 +66,34 @@
 
 格式：日期/阶段 · 现象 · 根因 · 教训 · 修正。
 
+### E7（2026-10-31 · 阶段2 · 凭「源码大小直觉」写体积风险，被实测证伪）
+
+- **现象**：阶段 2 首次构建成功（C3 854,920 B / C6 954,226 B）。核对后发现计划风险表里「`debug_probe` 全量进 IRAM 会吃掉 C3 余量、约 98 KB」与实测差一个数量级：`libdebug_probe.a` 的 `text` 合计只有 8,381 B，C3 上真正落进 `iram0_text` 的是 7,598 B，整个 `iram0_text` 也只有 83,968 B。
+- **根因**：写风险条目时用的是「组件源码目录大小」的直觉，没有按链接产物核算；同时又低估了 `-ffunction-sections` + `--gc-sections` 与 `#if` 剪枝的效果（`JTAG_DP.c`/`esp_usb_jtag.c` 编出来是空对象）。
+- **教训**：① 任何写进文档的「体积/占用」数字都必须来自产物（`idf.py size`、`riscv32-esp-elf-size libX.a`、链接 `.map`），不能来自源码行数或目录大小。② 读 ELF/map 时先分清**占位段**：C3 的 `.dram0.dummy` 有 83,968 B、`.flash_rodata_dummy` 有 655,360 B，它们是对齐填充而不是真实占用，直接用 `readelf -S` 求和会把 DRAM 高估 3 倍。③ 判断「分区放不放得下」要拿 `Total image size` 对比**实际分区表**（本仓库是默认 `partitions_singleapp`，`factory` 1 MB），而不是对比 flash 容量。
+- **修正**：Plan.md 升 v8，把风险条目改为「已实测证伪」并补上真实数字，新增「C6 已占 app 分区 91 %」的风险与缓解（改 `partitions.csv`）；阶段 2 增加「体积数据」表作为后续阶段基线。
+
+### E6（2026-10-31 · 阶段2 · 组件 REQUIRES 用了角色判断，C6/C3 上 tinyusb 解析失败）
+
+- **现象**：`idf.py -B build_c6 set-target esp32c6` 直接停在配置阶段：
+  `CMake Error at .../tools/cmake/build.cmake:380 (message): Failed to resolve component 'tinyusb' required by component 'main': unknown name.`
+  S3 同样代码却正常。
+- **根因**：`main/CMakeLists.txt` 把 `tinyusb`/`usb` 追加进 `REQUIRES` 的条件写成了角色判断 `if(NOT CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE)`。但组件的 `REQUIRES` 是由 **早展开**（`tools/cmake/scripts/component_get_requirements.cmake`，由 `build.cmake` 的 `__component_get_requirements` 在 `__kconfig_generate_config` / `__build_import_configs` **之前**调用）读取的；该脚本只 include 构建属性文件与各组件 CMakeLists.txt，**从不 include sdkconfig.cmake**，所以那一趟 `CONFIG_*` 全是空字符串 → `NOT ""` 为真 → 从机也被要求 tinyusb。而 `main/idf_component.yml` 的 rules 只在 S2/S3 提供 tinyusb，C3/C6 上没有这个组件，"unknown name" 即在解析 REQUIRES 时抛出（`__build_resolve_and_add_req`）。
+- **教训**：① CMakeLists 里的内容分两类——早展开可见且被采纳的（`REQUIRES`、`PRIV_REQUIRES`、`INCLUDE_DIRS`、`KCONFIG`/`KCONFIG_PROJBUILD`）与只有真实 pass 才生效的（`SRCS`、`LDFRAGMENTS`、任何 `target_*`/`idf_build_*` 调用）。**前者只能用构建属性（`IDF_TARGET` 等）判断，后者才可以用 `CONFIG_*`**。② 「在 S3 上一直能构建」不代表判断是对的：S3 恰好有 tinyusb，把角色判断写错这件事完全掩盖了；跨芯片 target 才把它暴露成硬错误。③ 见到 "Failed to resolve component 'X' required by component 'Y'"，先查两件事：X 的 manifest/kconfig target 规则是否排除当前 target，以及 Y 把 X 写进 REQUIRES 的条件是不是用了早展开看不到的变量。
+- **修正**：把两类判断拆开——源码仍按角色（`if(NOT CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE)` 追加 `eub_vendord.c`/`serial_bridge.c`/`usb_phy.c`），依赖改为按 target：
+
+  ```cmake
+  set(bridge_usb_stack FALSE)
+  if(IDF_TARGET STREQUAL "esp32s2" OR IDF_TARGET STREQUAL "esp32s3")
+      set(bridge_usb_stack TRUE)
+  endif()
+  if(bridge_usb_stack)
+      list(APPEND dependencies "tinyusb" "usb")
+  endif()
+  ```
+
+  S3 三个角色语义不变（wired/host 有源码+依赖；slave 无 USB 源码但仍 REQUIRES tinyusb/usb，与阶段 1 gate 通过时一致），C3/C6 两者皆无。
+
 ### E5（2026-10-31 · 阶段1.1 · 从机 SWD 首请求丢失，源仓库遗留）
 
 - **现象**：ESP-NOW 已配对时，偶见「第一次 SWD 烧录失败、重跑就好」。开 `CONFIG_WLINK_SWD_VERBOSE_LOG=y` 后首条命令的日志是 `already in flight, ignored`，且前面没有一条 `queued`。
@@ -112,6 +140,8 @@
 - [ ] 改完是否回读/校验？
 - [ ] 是否新增/改动了「带初值的静态状态变量」？其初值是否可能与首个真实值碰撞（E5）？
 - [ ] 是否改动了初始化顺序（队列/回调/任务）？有无「回调先于设施」的窗口（E5）？
+- [ ] 若在 CMakeLists 里用 `CONFIG_*` 决定 `REQUIRES`/`INCLUDE_DIRS`/`KCONFIG`，是否确认早展开阶段能看见它？（多半看不见，改用 `IDF_TARGET` 等构建属性，E6）
+- [ ] 文档里要写的体积/占用数字，是否来自链接产物而非源码直觉？求和时是否排除了 `*_dummy` 占位段（E7）？
 - [ ] 是否需要更新 Agent.md 失败经验？
 
 ---
