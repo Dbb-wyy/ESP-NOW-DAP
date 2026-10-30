@@ -41,6 +41,15 @@ static const char *TAG = "bridge_glue";
 /* Maximum DAP packet on the wire, matches DAP_PACKET_SIZE / EUB_VENDORD_EPSIZE. */
 #define BRIDGE_SWD_PKT_SIZE 64
 
+/*
+ * Depth of the slave SWD request queue, and of the sequence list that tracks the requests
+ * which were accepted but not answered yet. The list has to cover the queue plus whatever
+ * the DAP engine still holds (1024 byte ring buffers holding 64 byte packets); the host is
+ * stop-and-wait, so in practice one or two entries are in use.
+ */
+#define BRIDGE_SWD_REQ_QUEUE_DEPTH 8
+#define BRIDGE_SWD_SEQ_FIFO_DEPTH 32
+
 /* How often the host relay re-checks the link while it waits for the peer. */
 #define BRIDGE_PEER_POLL_MS 100
 
@@ -177,52 +186,143 @@ typedef struct {
 } bridge_swd_req_t;
 
 static QueueHandle_t s_swd_req_q;
-static volatile uint8_t s_swd_pending_seq;
+
+/*
+ * Sequence numbers of the requests that were accepted but not answered yet, oldest first.
+ * The DAP engine answers every request with exactly one response, in request order, so
+ * popping one entry per response keeps each answer tied to the request that produced it
+ * -- even when the host already gave up on an older request and sent the next one.
+ *
+ * Guarded by s_swd_seq_mux: the Wi-Fi callback and both link tasks touch it, and all of
+ * them run in task context, so a spinlock is enough.
+ */
+static uint8_t s_swd_seq_fifo[BRIDGE_SWD_SEQ_FIFO_DEPTH];
+static size_t s_swd_seq_fifo_head;
+static size_t s_swd_seq_fifo_count;
+static portMUX_TYPE s_swd_seq_mux = portMUX_INITIALIZER_UNLOCKED;
+
+/* Last answer, so a retransmitted request is served without running the DAP command twice. */
 static uint8_t s_swd_last_seq;
 static bool s_swd_last_valid;
 static uint8_t s_swd_last_resp[BRIDGE_SWD_PKT_SIZE];
 static size_t s_swd_last_resp_len;
 
+/* The s_swd_seq_fifo helpers require s_swd_seq_mux to be held. */
+static bool bridge_swd_seq_pending(uint8_t seq)
+{
+    for (size_t i = 0; i < s_swd_seq_fifo_count; i++) {
+        size_t slot = (s_swd_seq_fifo_head + i) % BRIDGE_SWD_SEQ_FIFO_DEPTH;
+        if (s_swd_seq_fifo[slot] == seq) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool bridge_swd_seq_push(uint8_t seq)
+{
+    if (s_swd_seq_fifo_count >= BRIDGE_SWD_SEQ_FIFO_DEPTH) {
+        return false;
+    }
+
+    size_t slot = (s_swd_seq_fifo_head + s_swd_seq_fifo_count) % BRIDGE_SWD_SEQ_FIFO_DEPTH;
+    s_swd_seq_fifo[slot] = seq;
+    s_swd_seq_fifo_count++;
+    return true;
+}
+
+static bool bridge_swd_seq_pop(uint8_t *seq)
+{
+    if (s_swd_seq_fifo_count == 0) {
+        return false;
+    }
+
+    if (seq) {
+        *seq = s_swd_seq_fifo[s_swd_seq_fifo_head];
+    }
+    s_swd_seq_fifo_head = (s_swd_seq_fifo_head + 1) % BRIDGE_SWD_SEQ_FIFO_DEPTH;
+    s_swd_seq_fifo_count--;
+    return true;
+}
+
+/* Undo the last push, for a request that turned out not to be queued after all. */
+static void bridge_swd_seq_drop_last(void)
+{
+    if (s_swd_seq_fifo_count > 0) {
+        s_swd_seq_fifo_count--;
+    }
+}
+
 /* Runs in the Wi-Fi task: only queues the request, the DAP engine runs in its own task. */
 static void bridge_slave_swd_rx(const wlink_hdr_t *hdr, const uint8_t *payload, size_t len)
 {
+    if (len == 0 || len > BRIDGE_SWD_PKT_SIZE) {
+        ESP_LOGW(TAG, "DAP request seq %u has an unusable length (%u bytes), dropped",
+                 hdr->seq, (unsigned)len);
+        return;
+    }
+
+    /* Copy the cached answer under the lock the sender uses, so a response that lands
+       meanwhile cannot tear the sequence number away from its payload. */
+    uint8_t cached[BRIDGE_SWD_PKT_SIZE];
+    size_t cached_len = 0;
+    bool have_cached = false;
+
+    portENTER_CRITICAL(&s_swd_seq_mux);
     if (s_swd_last_valid && hdr->seq == s_swd_last_seq) {
+        cached_len = s_swd_last_resp_len;
+        memcpy(cached, s_swd_last_resp, cached_len);
+        have_cached = true;
+    }
+    portEXIT_CRITICAL(&s_swd_seq_mux);
+
+    if (have_cached) {
         /* The host missed our answer: reply from the cache instead of running the
            DAP command a second time, which could double-apply a register write. */
         BRIDGE_SWD_PKT_LOG("DAP request seq %u served from the cache (retransmit)", hdr->seq);
-        wlink_send(WLINK_MSG_SWD, 0, s_swd_last_seq, s_swd_last_resp, s_swd_last_resp_len);
-        return;
-    }
-
-    if (hdr->seq == s_swd_pending_seq) {
-        /* Already being processed, the response will be sent as soon as it is ready. */
-        BRIDGE_SWD_PKT_LOG("DAP request seq %u is already in flight, ignored", hdr->seq);
-        return;
-    }
-
-    if (!s_swd_req_q) {
-        ESP_LOGW(TAG, "SWD request queue is not ready yet, dropping seq %u", hdr->seq);
+        wlink_send(WLINK_MSG_SWD, 0, hdr->seq, cached, cached_len);
         return;
     }
 
     bridge_swd_req_t req = {
         .seq = hdr->seq,
-        .len = (uint8_t)(len > BRIDGE_SWD_PKT_SIZE ? BRIDGE_SWD_PKT_SIZE : len),
+        .len = (uint8_t)len,
     };
-    if (req.len > 0) {
-        memcpy(req.data, payload, req.len);
+    memcpy(req.data, payload, req.len);
+
+    /*
+     * Accepting the request and recording its sequence number are one step: the same seq
+     * must never be queued twice (the DAP command would run twice), and a request that is
+     * dropped below must not leave a sequence entry behind.
+     */
+    bool duplicate = false;
+    bool queued = false;
+
+    portENTER_CRITICAL(&s_swd_seq_mux);
+    duplicate = bridge_swd_seq_pending(hdr->seq);
+    if (!duplicate && s_swd_req_q && bridge_swd_seq_push(hdr->seq)) {
+        if (xQueueSend(s_swd_req_q, &req, 0) != pdTRUE) {
+            bridge_swd_seq_drop_last();
+        } else {
+            queued = true;
+        }
+    }
+    portEXIT_CRITICAL(&s_swd_seq_mux);
+
+    if (duplicate) {
+        /* Already accepted: the answer to it is on its way, and once it is cached a
+           retransmission is served from there. */
+        BRIDGE_SWD_PKT_LOG("DAP request seq %u is already in flight, ignored", hdr->seq);
+        return;
     }
 
-    uint8_t previous_pending = s_swd_pending_seq;
-    s_swd_pending_seq = hdr->seq;
-
-    if (xQueueSend(s_swd_req_q, &req, 0) != pdTRUE) {
-        s_swd_pending_seq = previous_pending;
-        ESP_LOGW(TAG, "SWD request queue full, dropping seq %u", hdr->seq);
-    } else {
-        BRIDGE_SWD_PKT_LOG("DAP request seq %u received over the link (%u bytes), queued",
-                           hdr->seq, (unsigned)req.len);
+    if (!queued) {
+        ESP_LOGW(TAG, "SWD request seq %u dropped: request queue not ready or full", hdr->seq);
+        return;
     }
+
+    BRIDGE_SWD_PKT_LOG("DAP request seq %u received over the link (%u bytes), queued",
+                       hdr->seq, (unsigned)req.len);
 }
 
 static void bridge_slave_swd_rx_task(void *arg)
@@ -235,8 +335,31 @@ static void bridge_slave_swd_rx_task(void *arg)
         }
 
         esp_err_t err = debug_probe_process_data(req.data, req.len);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "DAP request seq %u rejected: %s", req.seq, esp_err_to_name(err));
+        if (err == ESP_OK) {
+            continue;
+        }
+
+        /*
+         * The DAP engine will never answer this request, so its sequence entry has to go
+         * as well: requests are taken in accept order, which makes this one the oldest
+         * pending entry, and leaving it behind would make the next answer carry its number.
+         */
+        uint8_t dropped_seq = 0;
+        bool dropped = false;
+
+        portENTER_CRITICAL(&s_swd_seq_mux);
+        dropped = bridge_swd_seq_pop(&dropped_seq);
+        portEXIT_CRITICAL(&s_swd_seq_mux);
+
+        if (!dropped) {
+            ESP_LOGW(TAG, "DAP request seq %u rejected (%s), no sequence entry to drop",
+                     req.seq, esp_err_to_name(err));
+        } else if (dropped_seq != req.seq) {
+            ESP_LOGW(TAG, "DAP request seq %u rejected (%s), sequence list out of sync (head %u)",
+                     req.seq, esp_err_to_name(err), dropped_seq);
+        } else {
+            ESP_LOGW(TAG, "DAP request seq %u rejected (%s), request dropped",
+                     req.seq, esp_err_to_name(err));
         }
     }
 }
@@ -250,22 +373,38 @@ static void bridge_slave_swd_tx_task(void *arg)
             continue;
         }
 
-        if (len > 0) {
-            size_t n = len > BRIDGE_SWD_PKT_SIZE ? BRIDGE_SWD_PKT_SIZE : len;
+        /*
+         * One answer per request and in request order, so the oldest pending sequence
+         * number is the one this answer belongs to. Popping it here -- instead of reading
+         * a "request currently in flight" variable -- is what keeps the answer correct when
+         * the host already gave up on that request and sent the next one.
+         */
+        uint8_t seq = 0;
+        size_t n = len > BRIDGE_SWD_PKT_SIZE ? BRIDGE_SWD_PKT_SIZE : len;
+        bool have_seq = false;
 
+        portENTER_CRITICAL(&s_swd_seq_mux);
+        have_seq = bridge_swd_seq_pop(&seq);
+        if (have_seq && n > 0) {
             /* Cache the answer so a retransmitted request can be served without
                executing the DAP command twice. */
-            s_swd_last_seq = s_swd_pending_seq;
+            s_swd_last_seq = seq;
             s_swd_last_resp_len = n;
             memcpy(s_swd_last_resp, buf, n);
             s_swd_last_valid = true;
+        }
+        portEXIT_CRITICAL(&s_swd_seq_mux);
 
-            if (wlink_send(WLINK_MSG_SWD, 0, s_swd_last_seq, s_swd_last_resp, n) != ESP_OK) {
-                ESP_LOGW(TAG, "Cannot send DAP response seq %u", s_swd_last_seq);
-            } else {
-                BRIDGE_SWD_PKT_LOG("DAP response seq %u sent over the link (%u bytes)",
-                                   s_swd_last_seq, (unsigned)n);
-            }
+        if (!have_seq) {
+            ESP_LOGE(TAG, "DAP response of %u bytes has no pending request, dropped",
+                     (unsigned)len);
+        } else if (n == 0) {
+            BRIDGE_SWD_PKT_LOG("DAP response seq %u is empty, nothing to send", seq);
+        } else if (wlink_send(WLINK_MSG_SWD, 0, seq, s_swd_last_resp, n) != ESP_OK) {
+            ESP_LOGW(TAG, "Cannot send DAP response seq %u", seq);
+        } else {
+            BRIDGE_SWD_PKT_LOG("DAP response seq %u sent over the link (%u bytes)",
+                               seq, (unsigned)n);
         }
 
         debug_probe_free_sent_data(buf);
@@ -302,11 +441,8 @@ esp_err_t bridge_wireless_slave_start(void)
     serial_handler_register_rx_activity_callback(bridge_led_serial_rx);
     bridge_probe_register_activity_callback(bridge_led_debug);
 
-    s_swd_req_q = xQueueCreate(8, sizeof(bridge_swd_req_t));
-    if (!s_swd_req_q) {
-        ESP_LOGE(TAG, "Cannot allocate the SWD request queue");
-        return ESP_ERR_NO_MEM;
-    }
+    /* The request queue is created by bridge_uplink_init() right before it registers the
+       receive callback, so it cannot be missing here. */
 
     /* The DAP engine touches dedicated GPIO, which is CPU local, so keep both tasks
        on the core that debug_probe_init() bound the pins to. */
@@ -502,6 +638,19 @@ esp_err_t bridge_uplink_init(void)
     /* The host has no target UART: it only relays to the link. */
     return wlink_register_rx(WLINK_MSG_SWD, bridge_host_swd_rx);
  #else
+    /*
+     * The queue has to exist before the receive callback is registered below: a request
+     * that arrives in between would be dropped, which is exactly the "first SWD access
+     * after a fresh power-up fails" symptom.
+     */
+    if (!s_swd_req_q) {
+        s_swd_req_q = xQueueCreate(BRIDGE_SWD_REQ_QUEUE_DEPTH, sizeof(bridge_swd_req_t));
+        if (!s_swd_req_q) {
+            ESP_LOGE(TAG, "Cannot allocate the SWD request queue");
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
     err = wlink_register_rx(WLINK_MSG_SWD, bridge_slave_swd_rx);
     if (err != ESP_OK) {
         return err;

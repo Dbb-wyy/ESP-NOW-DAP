@@ -1,6 +1,6 @@
 # END_nightly 移植计划：从机多目标（C6/C3/S3）+ 保留 wired/host（S3）
 
-> 修订 v4 —— 依据用户澄清调整：
+> 修订 v5 —— 新增第 8 条与「阶段 1.1」（从机 SWD 首请求丢失修复，用户 m00318/m00346）；此前 v4 —— 依据用户澄清调整：
 > 1. 强调词「!从机!」= 强调从机，而非「仅从机」。
 > 2. END_nightly **保留全部三个角色**（wired / wireless host / wireless slave）；wired 与 host **仅兼容 S3**，不做 C6/C3；**slave 兼容 C6/C3/S3**。
 > 3. 「我」= 用户。**agent 只写代码/文档，禁止编译、烧录、运行任何测试**；每个阶段结束由用户验证，通过后方可进入下一阶段。
@@ -8,6 +8,7 @@
 > 5. END_nightly 是已 git init 的 idf 项目；阶段 0 把源仓库文件导入其中，用其自身 git 记录（不保留源仓库 git 历史）。
 > 6. tinyusb 条件范围保留 target in [esp32s2, esp32s3]。
 > 7. （m00266）新增调试宏 `CONFIG_WLINK_DEBUG_LINK_TEST`：ESP-NOW 配对后，从机每秒向主机发送 `connected N`（N 持续递增），用于定位链路问题；默认关闭，仅调试时启用。
+> 8. （m00318）**偏离 §1 R2「bridge_glue 从机侧零改动」**：用户报告「偶见第一次 SWD 烧录失败」，定位到源仓库遗留 bug（从机 `s_swd_pending_seq` 静态初值 0 与主机首个请求 seq 0 相撞，被当作重复请求丢弃，三次重传仍用 seq 0 故首条 DAP 命令必丢）。用户选定方案 B（请求序号 FIFO 关联响应），作为**阶段 1.1 补丁**并入阶段 1 的 gate，改动见下方「阶段 1.1」。
 
 ---
 
@@ -30,7 +31,7 @@
 | # | 职责 | 源仓库位置 | 关键函数 | 对 C3/C6 的影响 |
 |---|---|---|---|---|
 | R1 | ESP-NOW 无线链路 | components/wireless_link/ | wlink_init、wlink_recv_cb、wlink_send、wlink_beacon_cb、wlink_peer_ready | 零改动（esp_wifi/esp_now 在 C3/C6 都有） |
-| R2 | CMSIS-DAP SWD 调试 | components/debug_probe/ + main/bridge_glue.c 从机侧 | DAP_ProcessCommand、debug_gpio.c/h（dedic_gpio 位打 SWCLK/SWDIO）、bridge_slave_swd_rx(_task)、bridge_slave_swd_tx_task | 零功能改动（C3/C6 有 dedic_gpio，RISC-V 用 CSR，API 一致） |
+| R2 | CMSIS-DAP SWD 调试 | components/debug_probe/ + main/bridge_glue.c 从机侧 | DAP_ProcessCommand、debug_gpio.c/h（dedic_gpio 位打 SWCLK/SWDIO）、bridge_slave_swd_rx(_task)、bridge_slave_swd_tx_task | 零功能改动（C3/C6 有 dedic_gpio，RISC-V 用 CSR，API 一致）；**例外**：从机 SWD 排队/序号关联的遗留 bug 修复（阶段 1.1，见 §3） |
 | R3 | 目标 UART 串口 | components/serial_handler/ | serial_handler_init、serial_handler_send_data、uart_event_task | 零改动（C3/C6 有 UART0/UART1） |
 | R4 | 串口控制信号 + 复位时序 | main/bridge_glue.c | bridge_on_link_sercmd、bridge_apply_line_state、serial_handler_set_boot_reset_pins（含 esptool 10ms 补丁、TDI strapping） | 零改动（纯 GPIO/UART/esp_timer） |
 | R5 | 状态 LED | components/util/include/led_io.h + bridge_glue.c 的 bridge_led_* | GPIO 翻转 | 零改动，仅引脚重配 |
@@ -114,6 +115,27 @@
 3. S3 wireless slave 构建通过，且固件体积明显小于 wired/host（无 USB 栈）。
 
 **通过判据**：S3 三角色都构建通过 + 行为照旧 + slave 体积变小。
+
+### 阶段 1.1 —— 修复从机 SWD 首请求被误判为重复而丢弃（并入阶段 1 gate）
+
+**背景（源仓库遗留 bug，用户 m00318 报告）**：主机 `wlink_next_seq()` 从 0 开始（components/wireless_link/wireless_link.c:36 的 `static uint8_t s_seq`，:333-335 `return s_seq++`），从机 `s_swd_pending_seq` 静态初值也是 0，接收函数用 `hdr->seq == s_swd_pending_seq` 判断「重复请求」，于是每个新鲜上电会话的首条 DAP 命令被丢弃；主机三次重传用同一个 seq，全部被丢，约 3×250ms 后放弃，USB 侧超时。表现为「偶见第一次烧录失败、重跑就好」（只有 adapter 初始化阶段的 DAP_Info/DAP_Connect 失败才会终止整次烧录）。
+
+**方案 B（用户 m00346 选定）：请求序号 FIFO 关联响应**
+
+**改动（全部在 main/bridge_glue.c）**
+1. 新增宏 `BRIDGE_SWD_REQ_QUEUE_DEPTH`(8)、`BRIDGE_SWD_SEQ_FIFO_DEPTH`(32)，紧邻 `BRIDGE_SWD_PKT_SIZE`。
+2. 删除 `s_swd_pending_seq`；新增 `s_swd_seq_fifo[]` + head/count + `portMUX_TYPE s_swd_seq_mux`，以及四个持锁辅助 `bridge_swd_seq_pending/push/pop/drop_last`。
+3. `bridge_slave_swd_rx`：缓存命中时先在锁内拷到栈上再出锁重发（避免撕裂）；「接受请求」与「登记序号」在同一临界区内完成（`pending` 查重 → `push` → `xQueueSend`，入队失败回滚）；日志一律在锁外。
+4. `bridge_slave_swd_rx_task`：`debug_probe_process_data` 失败时弹出最老序号（DAP 引擎不会再应答它），防止后续响应串号。
+5. `bridge_slave_swd_tx_task`：不再读「当前 pending」，改为弹出 FIFO 头作为该响应的 seq，并在同一临界区写缓存 → 修掉「主机放弃 N 后发 N+1、N 的迟到响应被标成 N+1」的静默错值。
+6. 队列创建从 `bridge_wireless_slave_start` 移到 `bridge_uplink_init` 的从机分支、**先建队列再注册 `bridge_slave_swd_rx`**（原先回调先注册、队列后建，配对极快时首个请求会撞上空队列被丢）。
+
+**用户验证（在阶段 1 的 gate 里一并做）**
+1. 两端同时冷启动，第一条命令就是 SWD 烧录，连续 20 次首条即成功（修复前会稳定复现首条失败）。
+2. 打开 `CONFIG_WLINK_SWD_VERBOSE_LOG=y` 观察：修复前首条应为 `already in flight, ignored` 且无 `queued`；修复后应为 `queued` → `response seq 0 sent`，且无约 750ms 停顿。
+3. 回归：从机中途复位后继续烧录；两条命令之间给从机断电再上电；正常整片烧录成功。
+
+**通过判据**：1–3 全过。
 
 ### 阶段 2 —— C3/C6 目标接入（首次跨芯片构建）
 
@@ -215,6 +237,7 @@
 | main/main.c | #if !CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE 包 USB 代码 |
 | main/idf_component.yml | tinyusb 加 rules（target in [esp32s2, esp32s3]） |
 | main/Kconfig.projbuild | wired/host depends on SOC_USB_OTG_SUPPORTED；角色默认目标感知 |
+| main/bridge_glue.c | 阶段 1.1：从机 SWD 请求序号 FIFO 关联响应（修首请求被误丢 + 响应串号 + 队列建立顺序） |
 | sdkconfig.defaults.esp32c3 / esp32c6 | 新增（引脚/flash/CPU/SWD） |
 | sdkconfig.defaults.wireless_slave | 仅用于 S3 从机（含 CPU1 WDT 符号，不用于 C3/C6） |
 | 其余全部文件（components、DAP、msc、docs、test 等） | 原样保留 |
