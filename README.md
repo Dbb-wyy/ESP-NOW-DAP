@@ -75,7 +75,7 @@ idf.py -B build_slave -D SDKCONFIG=sdkconfig.slave \
 - `main/bridge_glue.c` —— 在 USB、目标串口/SWD 引脚与链路之间做角色分发的中间层
 - `docs/wireless.md` —— 无线部分的设计说明
 
-所有源自 EUB 的文件中，上游版权声明均原样保留；产生原始代码的提交历史保留在 [CHANGELOG.md](CHANGELOG.md) 中。
+所有源自 EUB 的文件中，上游版权声明均原样保留；本仓库不携带上游仓库的提交历史。
 
 另外，感谢 viric 在 Espressif 的 ESP USB Bridge 项目中提交的 [PR #40](https://github.com/espressif/esp-usb-bridge/pull/40)。其中关于 `dedic_gpio` 下 SWD 输出无法正确关闭的问题及其修复思路，帮助解决了本项目开发过程中的关键问题。
 
@@ -256,8 +256,8 @@ possible:
 - `main/bridge_glue.c` — the role dispatching glue between USB, the target UART/SWD pins and the link
 - `docs/wireless.md` — the wireless design notes
 
-Upstream copyright notices are retained unchanged in every file that came from EUB, and the
-commit history that produced the original code is preserved in [CHANGELOG.md](CHANGELOG.md).
+Upstream copyright notices are retained unchanged in every file that came from EUB; this
+repository does not carry the upstream commit history.
 
 Additionally, thanks to viric for [PR #40](https://github.com/espressif/esp-usb-bridge/pull/40)
 in Espressif's ESP USB Bridge project. The issue with the SWD output under `dedic_gpio` not

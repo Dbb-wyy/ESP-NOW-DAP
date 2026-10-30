@@ -13,21 +13,18 @@ sdkconfig.wired
 sdkconfig.host
 sdkconfig.slave
 
-# CI configuration is kept locally only: the workflows referenced Espressif's
-# internal Jira/Launchpad/danger infrastructure and do not apply to this fork.
-# .gitlab-ci.yml is tracked-but-ignored, see `git rm --cached` in the history.
+# CI configuration and personal tool config are kept on disk but intentionally
+# untracked: the workflows referenced Espressif's internal Jira/Launchpad/danger
+# infrastructure and do not apply to this fork.
 .github/
 .gitlab-ci.yml
 
 
-# Old repository history
+# Old repository history (kept on disk, not tracked)
 .cz.toml
-CHANGELOG.md
 
-# My Editor settings
+# My Editor settings (kept on disk, not tracked)
 .clangd
 .vscode/
 
-# My personal notes
-docs/
-test/
+# docs/ is tracked. test/ and CHANGELOG.md were removed from the tree.

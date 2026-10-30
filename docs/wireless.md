@@ -32,7 +32,7 @@ The build fails with an explicit `#error` in `main/bridge_glue.c` otherwise.
  ┌────────────────┐                     ┌──────────────────────┐      ┌──────────────────────┐    ┌────────────┐
  │ OpenOCD        │──USB bulk EP3──────▶│ eub_vendord          │      │ bridge_slave_swd_rx  │    │            │
  │ (cmsis-dap)    │◀─USB bulk EP3───────│   ↓ bridge_probe_*   │      │   ↓ DAP_ProcessCommand│   │            │
- │                │                     │ swd_relay_task       │      │   ↓ dedic_gpio 位打   │──▶│ SWCLK/SWDIO│
+ │                │                     │ swd relay task       │      │   ↓ dedic_gpio 位打   │──▶│ SWCLK/SWDIO│
  │                │                     │   ⇅                  │      │                      │    │            │
  │                │                     │                      │      │                      │    │            │
  │ esptool /      │──USB CDC OUT───────▶│ tud_cdc_rx_cb        │      │ bridge_on_link_serial│    │            │
@@ -96,7 +96,7 @@ typedef struct __attribute__((packed)) {
 CMSIS-DAP is request/response, and ESP-NOW can drop or duplicate frames, so the
 relay adds a small amount of protocol on top of the link.
 
-**Host side** (`swd_relay_task` in `main/bridge_glue.c`)
+**Host side** (`bridge_host_swd_relay_task` in `main/bridge_glue.c`)
 
 * `tud_vendor` OUT data is queued (non-blocking) so the TinyUSB task is never
   blocked by link latency.
@@ -117,13 +117,25 @@ relay adds a small amount of protocol on top of the link.
   console is much slower than that; `CONFIG_WLINK_SWD_VERBOSE_LOG` promotes it to
   info level when the path has to be diagnosed.
 
-**Slave side** (`bridge_slave_swd_rx` in `main/bridge_glue.c`)
+**Slave side** (`bridge_slave_swd_rx` / `_rx_task` / `_tx_task` in `main/bridge_glue.c`)
 
 * The last response is cached together with its sequence number. A retransmitted
-  request is answered **from the cache without re-executing the DAP command**,
-  which matters because replaying e.g. a register write is not idempotent.
-* A request that is already being processed is ignored; its answer is sent as
-  soon as the DAP engine produces it.
+  request whose `seq` equals the cached one is answered **from the cache without
+  re-executing the DAP command**, which matters because replaying e.g. a register
+  write is not idempotent.
+* Accepted requests are recorded in a **FIFO of sequence numbers**
+  (`s_swd_seq_fifo`, depth `BRIDGE_SWD_SEQ_FIFO_DEPTH`). A request whose `seq` is
+  already in the FIFO is still in flight: it is ignored, and its answer goes out
+  when the DAP engine produces it. This is what keeps the very first request
+  (`seq` = 0, which used to collide with an unset "in flight" marker) from being
+  mistaken for a duplicate and dropped.
+* The response task pops the **oldest** pending `seq` and tags the response with
+  it. Pairing is therefore by acceptance order, not by "the request currently
+  being processed", so a late answer to an abandoned request can no longer be
+  labelled with the next request's number.
+* Accepting a request (duplicate check → push → enqueue) happens in one critical
+  section, and the request queue is created before the rx callback is registered,
+  so a request arriving right after pairing cannot fall into a missing queue.
 * The DAP engine runs in its own task pinned to the same core that bound the
   dedicated GPIO, since `dedic_gpio` bundles are CPU-local.
 
@@ -153,8 +165,11 @@ link: baud rate changes and the reset dance are tunneled transparently.
 |---|---|---|
 | `CONFIG_BRIDGE_ROLE_*` | `main/Kconfig.projbuild` | role of this image |
 | `CONFIG_WLINK_CHANNEL` | `components/wireless_link/Kconfig` | must match on both boards |
+| `CONFIG_WLINK_PEER_WAIT_MS` | ditto | how long the host waits for pairing before sending anyway |
 | `CONFIG_WLINK_SWD_TIMEOUT_MS` | ditto | per-attempt DAP response timeout |
 | `CONFIG_WLINK_SWD_RETRIES` | ditto | request retransmissions before giving up |
+| `CONFIG_WLINK_SWD_VERBOSE_LOG` | ditto | promote per-packet SWD relay logs from debug to info |
+| `CONFIG_WLINK_DEBUG_LINK_TEST` | ditto | debug only: slave sends `connected N` every second |
 | `CONFIG_DEBUG_PROBE_GPIO_TCK/TMS` | `sdkconfig.defaults.esp32s3` | SWCLK / SWDIO |
 | `CONFIG_SERIAL_HANDLER_GPIO_*` | `sdkconfig.defaults.esp32s3` | target UART + BOOT/RST |
 
