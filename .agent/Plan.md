@@ -1,5 +1,6 @@
 # END_nightly 移植计划：从机多目标（C6/C3/S3）+ 保留 wired/host（S3）
 
+> 位置：`.agent/Plan.md`（与 `Agent.md`、`Todo.md` 同在 `.agent/`；文中提及的这三个文件名均指该目录下的文件）。
 > 修订 v6 —— 新增第 9 条；按实际代码校正阶段状态、风险表与阶段 2 细则，并清理仓库（用户 m00518）。此前 v5 —— 新增第 8 条与「阶段 1.1」（从机 SWD 首请求丢失修复，用户 m00318/m00346）；v4 —— 依据用户澄清调整：
 > 1. 强调词「!从机!」= 强调从机，而非「仅从机」。
 > 2. END_nightly **保留全部三个角色**（wired / wireless host / wireless slave）；wired 与 host **仅兼容 S3**，不做 C6/C3；**slave 兼容 C6/C3/S3**。
