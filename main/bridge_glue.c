@@ -12,7 +12,6 @@
 #include "esp_err.h"
 #include "esp_timer.h"
 #include "esp_cpu.h"
-#include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -22,7 +21,6 @@
 #include "bridge_glue.h"
 #include "serial_bridge.h"
 #include "serial_handler.h"
-#include "led_io.h"
 
 #if !CONFIG_BRIDGE_ROLE_WIRED
 #include "wireless_link.h"
@@ -35,7 +33,7 @@ static const char *TAG = "bridge_glue";
 
 /* The wireless roles tunnel CMSIS-DAP, which only exists in the SWD build. */
 #if !CONFIG_BRIDGE_ROLE_WIRED && defined(CONFIG_DEBUG_PROBE_IFACE_JTAG)
-#error "The wireless bridge roles require 'Debug interface -> CMSIS-DAP SWD' (CONFIG_DEBUG_PROBE_IFACE_SWD)."
+#error "The wireless bridge roles require 'END-config -> Role configuration -> Debug interface -> CMSIS-DAP SWD' (CONFIG_DEBUG_PROBE_IFACE_SWD)."
 #endif
 
 /* Maximum DAP packet on the wire, matches DAP_PACKET_SIZE / EUB_VENDORD_EPSIZE. */
@@ -64,41 +62,6 @@ static const char *TAG = "bridge_glue";
 #else
 #define BRIDGE_SWD_PKT_LOG(fmt, ...) ESP_LOGD(TAG, fmt, ##__VA_ARGS__)
 #endif
-
-/* =================================================================== status LEDs */
-
-/* The three helpers below are the only places that touch the LED pins. They are
-   compiled to empty stubs unless CONFIG_BRIDGE_LED_ENABLE is set, so the eight call
-   sites stay identical in both configurations and no pin is ever configured on
-   boards whose LED wiring we do not know. */
-
-void bridge_led_serial_tx(bool active)
-{
-#if CONFIG_BRIDGE_LED_ENABLE
-    /* TX and RX LEDs are swapped so the LEDs show traffic in the bridge -> target direction. */
-    gpio_set_level(LED_RX, active ? LED_RX_ON : LED_RX_OFF);
-#else
-    (void)active;
-#endif
-}
-
-void bridge_led_serial_rx(bool active)
-{
-#if CONFIG_BRIDGE_LED_ENABLE
-    gpio_set_level(LED_TX, active ? LED_TX_ON : LED_TX_OFF);
-#else
-    (void)active;
-#endif
-}
-
-void bridge_led_debug(bool active)
-{
-#if CONFIG_BRIDGE_LED_ENABLE
-    gpio_set_level(LED_JTAG, active ? LED_JTAG_ON : LED_JTAG_OFF);
-#else
-    (void)active;
-#endif
-}
 
 /* ==================================================== local target side (wired/slave) */
 
@@ -178,9 +141,7 @@ static esp_err_t bridge_apply_line_state(bool dtr, bool rts)
 static void bridge_on_uart_data(const uint8_t *data, size_t len)
 {
 #if CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE
-    bridge_led_serial_rx(true);
     wlink_send(WLINK_MSG_SERIAL, 0, 0, data, len);
-    bridge_led_serial_rx(false);
 #else
     serial_bridge_target_data_received(data, len);
 #endif
@@ -454,10 +415,6 @@ esp_err_t bridge_wireless_slave_start(void)
         return err;
     }
 
-    serial_handler_register_tx_activity_callback(bridge_led_serial_tx);
-    serial_handler_register_rx_activity_callback(bridge_led_serial_rx);
-    bridge_probe_register_activity_callback(bridge_led_debug);
-
     /* The request queue is created by bridge_uplink_init() right before it registers the
        receive callback, so it cannot be missing here. */
 
@@ -515,7 +472,6 @@ static void bridge_host_swd_rx(const wlink_hdr_t *hdr, const uint8_t *payload, s
     }
 
     BRIDGE_SWD_PKT_LOG("DAP response seq %u arrived over the link (%u bytes)", hdr->seq, (unsigned)n);
-    bridge_led_debug(false);
     xSemaphoreGive(s_host_swd_resp_sem);
 }
 
@@ -587,7 +543,6 @@ static void bridge_host_swd_relay_task(void *arg)
             ESP_LOGW(TAG, "DAP request seq %u was not answered after %d attempts, link is %s",
                      seq, CONFIG_WLINK_SWD_RETRIES,
                      wlink_peer_ready() ? "paired" : "still unpaired");
-            bridge_led_debug(false);
         }
     }
 }
@@ -601,9 +556,7 @@ static void bridge_on_link_serial(const wlink_hdr_t *hdr, const uint8_t *payload
 #if CONFIG_BRIDGE_ROLE_WIRELESS_HOST
     serial_bridge_target_data_received(payload, len);
 #else
-    bridge_led_serial_tx(true);
     serial_handler_send_data(payload, len);
-    bridge_led_serial_tx(false);
 #endif
 }
 
@@ -630,8 +583,6 @@ esp_err_t bridge_uplink_init(void)
         return err;
     }
 
-    serial_handler_register_tx_activity_callback(bridge_led_serial_tx);
-    serial_handler_register_rx_activity_callback(bridge_led_serial_rx);
     return ESP_OK;
 #else
  #if CONFIG_BRIDGE_ROLE_WIRELESS_HOST
@@ -786,7 +737,6 @@ esp_err_t bridge_probe_process_data(const uint8_t *data, size_t len)
     }
 
     BRIDGE_SWD_PKT_LOG("DAP request from USB queued (%u bytes)", (unsigned)len);
-    bridge_led_debug(true);
     return ESP_OK;
 }
 
@@ -822,8 +772,7 @@ int bridge_probe_get_proto_caps(void *dest)
 
 void bridge_probe_register_activity_callback(debug_activity_notify_cb_t callback)
 {
-    (void)callback;  /* the relay drives the LED_JTAG helper itself (a stub unless
-                        CONFIG_BRIDGE_LED_ENABLE is set) */
+    (void)callback;  /* nothing to notify: the host side has no local activity LED */
 }
 
 void bridge_probe_handle_esp32_tdi_bootstrapping(bool rebooting)

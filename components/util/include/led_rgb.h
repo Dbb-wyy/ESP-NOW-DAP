@@ -14,12 +14,13 @@
 /*
  * Optional addressable (WS2812) RGB status LED.
  *
- * The pin is chosen with CONFIG_BRIDGE_WS2812_GPIO (-1 means none). The driver is
- * deliberately NOT implemented yet: led_rgb_init() only validates the pin and
- * records the intent, and the pin is left in its reset state - it is never
- * configured, never driven and never pulsed. Boards whose pinout does not match
- * the defaults therefore stay untouched, while the future status LED has one
- * place to land.
+ * The feature is switched on with CONFIG_BRIDGE_LED_ENABLE; with it disabled there is
+ * no LED pin at all and every function below is a stub. When enabled, the pin is chosen
+ * with CONFIG_BRIDGE_WS2812_GPIO (-1 means none). The driver is deliberately NOT
+ * implemented yet: led_rgb_init() only validates the pin and records the intent, and the
+ * pin is left in its reset state - it is never configured, never driven and never pulsed.
+ * Boards whose pinout does not match the defaults therefore stay untouched, while the
+ * future status LED has one place to land.
  *
  * Contract for the eventual driver (call sites already rely on it):
  *   - led_rgb_init() may then configure the pin and is still called once from app_main;
@@ -38,7 +39,7 @@ extern "C" {
  *
  * @return ESP_OK when the pin is unassigned (-1) or accepted.
  * @return ESP_ERR_INVALID_ARG when the number is outside the chip's GPIO range or
- *         already used by another bridge function (TX/RX/BOOT/RST, TCK/TMS, LEDs).
+ *         already used by another bridge function (TX/RX/BOOT/RST, TCK/TMS).
  */
 esp_err_t led_rgb_init(void);
 

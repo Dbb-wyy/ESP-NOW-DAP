@@ -1,161 +1,308 @@
-menu "Bridge Configuration"
+menu "END-config"
 
-    choice BRIDGE_ROLE
-        prompt "Bridge role"
-        default BRIDGE_ROLE_WIRED if SOC_USB_OTG_SUPPORTED
-        default BRIDGE_ROLE_WIRELESS_SLAVE
-        help
-            Select which end of the bridge this firmware implements.
+    # ===================================================== role configuration
 
-            Wired: a single chip carrying both ends, USB on one side and the target
-            UART/JTAG/SWD plus the mass storage disk on the other.
+    menu "Role configuration"
 
-            Wireless host: sits next to the PC. USB CDC and the CMSIS-DAP bulk
-            interface are tunnelled over ESP-NOW to a wireless slave.
+        choice BRIDGE_ROLE
+            prompt "Firmware role"
+            default BRIDGE_ROLE_WIRED if SOC_USB_OTG_SUPPORTED
+            default BRIDGE_ROLE_WIRELESS_SLAVE
+            help
+                Select which end of the bridge this firmware implements.
 
-            Wireless slave: sits next to the target. Drives the target UART, the
-            BOOT/RST pins and the CMSIS-DAP/SWD pins from the ESP-NOW link.
+                Wired: a single chip carrying both ends, USB on one side and the target
+                UART/JTAG/SWD plus the mass storage disk on the other.
 
-            Wired and wireless host need a USB OTG device controller, so they are
-            only offered on targets that have one (ESP32-S2/S3/P4/H4). Targets
-            without USB OTG (ESP32-C3/C6, ...) only offer the wireless slave.
+                Wireless host: sits next to the PC. USB CDC and the CMSIS-DAP bulk
+                interface are tunnelled over ESP-NOW to a wireless slave.
 
-            Both wireless roles require "Debug Probe Configuration -> CMSIS-DAP SWD".
+                Wireless slave: sits next to the target. Drives the target UART, the
+                BOOT/RST pins and the CMSIS-DAP/SWD pins from the ESP-NOW link.
 
-        config BRIDGE_ROLE_WIRED
-            bool "Wired (USB only)"
-            depends on SOC_USB_OTG_SUPPORTED
+                Wired and wireless host need a USB OTG device controller, so they are
+                only offered on targets that have one (ESP32-S2/S3/P4/H4). Targets
+                without USB OTG (ESP32-C3/C6, ...) only offer the wireless slave.
 
-        config BRIDGE_ROLE_WIRELESS_HOST
-            bool "Wireless host (USB <-> ESP-NOW)"
-            depends on SOC_USB_OTG_SUPPORTED
+                Both wireless roles require
+                "END-config -> Role configuration -> Debug interface -> CMSIS-DAP SWD".
 
-        config BRIDGE_ROLE_WIRELESS_SLAVE
-            bool "Wireless slave (ESP-NOW <-> target UART + SWD)"
-    endchoice
+            config BRIDGE_ROLE_WIRED
+                bool "Wired (USB only)"
+                depends on SOC_USB_OTG_SUPPORTED
 
-    config BRIDGE_USB_VID
-        hex "USB vendor ID"
-        default 0x303A
-        help
-            USB Vendor ID for the bridge device
+            config BRIDGE_ROLE_WIRELESS_HOST
+                bool "Wireless host (USB <-> ESP-NOW)"
+                depends on SOC_USB_OTG_SUPPORTED
 
-    config BRIDGE_USB_PID
-        hex "USB product ID"
-        default 0x1002
-        help
-            USB Product ID for the bridge device
+            config BRIDGE_ROLE_WIRELESS_SLAVE
+                bool "Wireless slave (ESP-NOW <-> target UART + SWD)"
+        endchoice
 
-    config BRIDGE_MANUFACTURER
-        string "USB bridge manufacturer"
-        default "Espressif Systems Co. Ltd."
-        help
-            Manufacturer string shown in USB device descriptor
+        choice DEBUG_PROBE_INTERFACE
+            prompt "Debug interface"
+            default DEBUG_PROBE_IFACE_JTAG
+            help
+                Select which debug interface to use.
 
-    config BRIDGE_PRODUCT_NAME
-        string "USB product name"
-        default "ESP USB Bridge"
-        help
-            Product name string shown in USB device descriptor
+                The two wireless roles tunnel CMSIS-DAP, which only exists in the SWD
+                build, so selecting ESP-USB JTAG together with a wireless role is a
+                compile time error (see the #error in main/bridge_glue.c).
 
-    config BRIDGE_LED_ENABLE
-        bool "Drive the status LEDs (LED1..3)"
-        default n
-        help
-            Drives the three discrete activity LEDs on BRIDGE_GPIO_LED1..3.
+            config DEBUG_PROBE_IFACE_JTAG
+                bool "ESP-USB JTAG"
 
-            Leave this disabled unless the board really has LEDs wired to those pins
-            with the configured polarity. While disabled the pins are never
-            configured, driven or reset, so they stay in their power-on state and
-            cannot disturb whatever the board actually connects there.
+            config DEBUG_PROBE_IFACE_SWD
+                bool "CMSIS-DAP SWD"
+        endchoice
 
-            The pin and polarity options below are kept in both configurations
-            because the LED code compiles against them either way; they are inert
-            while this option is off.
+        config DEBUG_PROBE_IFACE_NAME
+            string
+            default "JTAG" if DEBUG_PROBE_IFACE_JTAG
+            default "CMSIS-DAP"
 
-            This option does not cover an addressable RGB LED; see
-            BRIDGE_WS2812_GPIO.
+    endmenu
 
-    config BRIDGE_GPIO_LED1
-        int "GPIO pin LED1"
-        default 12
-        help
-            GPIO pin for LED1 (typically TX activity indicator). Only used when
-            BRIDGE_LED_ENABLE is set.
+    # ====================================================== pin configuration
 
-    config BRIDGE_GPIO_LED2
-        int "GPIO pin LED2"
-        default 13
-        help
-            GPIO pin for LED2 (typically RX activity indicator). Only used when
-            BRIDGE_LED_ENABLE is set.
+    menu "Pin configuration"
 
-    config BRIDGE_GPIO_LED3
-        int "GPIO pin LED3"
-        default 14
-        help
-            GPIO pin for LED3 (typically debug activity indicator). Only used when
-            BRIDGE_LED_ENABLE is set.
+        menu "Debug probe pins"
 
-    config BRIDGE_GPIO_LED1_ACTIVE
-        int "GPIO pin LED1 active value"
-        range 0 1
-        default 0
-        help
-            Logic level when LED1 is active (0=active low, 1=active high). Only used
-            when BRIDGE_LED_ENABLE is set.
+            config DEBUG_PROBE_GPIO_TDI
+                int "GPIO pin for the target TDI signal"
+                default 3
+                help
+                    GPIO pin connected to target's TDI (Test Data Input) signal.
 
-    config BRIDGE_GPIO_LED2_ACTIVE
-        int "GPIO pin LED2 active value"
-        range 0 1
-        default 0
-        help
-            Logic level when LED2 is active (0=active low, 1=active high). Only used
-            when BRIDGE_LED_ENABLE is set.
+                    Only used by the JTAG build; the SWD build expands the macro but
+                    never drives the pin, so it can stay at any value there.
 
-    config BRIDGE_GPIO_LED3_ACTIVE
-        int "GPIO pin LED3 active value"
-        range 0 1
-        default 0
-        help
-            Logic level when LED3 is active (0=active low, 1=active high). Only used
-            when BRIDGE_LED_ENABLE is set.
+            config DEBUG_PROBE_GPIO_TDO
+                int "GPIO pin for the target TDO signal"
+                default 9
+                help
+                    GPIO pin connected to target's TDO (Test Data Output) signal.
 
-    config BRIDGE_WS2812_GPIO
-        int "GPIO reserved for a WS2812 status LED (-1 = none)"
-        default -1
-        help
-            GPIO number reserved for an addressable RGB status LED (WS2812/WS2812B),
-            or -1 to reserve nothing.
+                    Only used by the JTAG build; the SWD build expands the macro but
+                    never drives the pin, so it can stay at any value there.
 
-            No driver is implemented yet: this option only records the intent and
-            led_rgb_init() merely validates the pin. The pin is left in its reset
-            state - it is never configured, driven or pulsed - so naming a pin on a
-            board without such an LED does not disturb anything either.
+            config DEBUG_PROBE_GPIO_TCK
+                int "GPIO pin for the target TCK signal"
+                default 10
+                help
+                    GPIO pin connected to target's TCK (Test Clock) signal. Also used as
+                    SWCLK in the SWD build.
 
-            led_rgb_init() rejects a pin outside the chip's GPIO range, and a pin
-            already used by the target UART, the debug probe or the activity LEDs.
+            config DEBUG_PROBE_GPIO_TMS
+                int "GPIO pin for the target TMS signal"
+                default 8
+                help
+                    GPIO pin connected to target's TMS (Test Mode Select) signal. Also
+                    used as SWDIO in the SWD build.
 
-            The eventual driver needs a peripheral that can emit 800 kHz pulse
-            trains (RMT is the usual choice), plus a 5 V supply and level shifting
-            on most WS2812 parts.
+        endmenu
 
-    config BRIDGE_MSC_VOLUME_LABEL
-        string "Volume label shown in the MSC disc"
-        default "ESPPROG_MSC"
-        help
-            Volume label shown in the MSC disc. Max length is 11 ASCII characters.
+        menu "Target serial + reset pins"
 
-    config BRIDGE_DOWNLOAD_MAGIC_BAUD
-        int "Magic baud rate to enter download mode"
-        default 1200
-        help
-            When the host sets the CDC serial port to this baud rate, download
-            mode reset is armed. Closing the port (clearing DTR) then resets the
-            bridge chip (ESP32-S2 or ESP32-S3) into download mode so its firmware
-            can be updated over USB. Do not use this baud for normal target
-            serial traffic; any DTR clear while armed triggers bridge download
-            mode. Prefer a baud that host tools will not use for the target.
-            Set to 0 to disable.
+            config SERIAL_HANDLER_GPIO_BOOT
+                int "GPIO pin for the BOOT signal"
+                default 4
+                help
+                    GPIO pin connected to target's BOOT signal (active low)
+
+            config SERIAL_HANDLER_GPIO_RST
+                int "GPIO pin for the RESET signal"
+                default 7
+                help
+                    GPIO pin connected to target's RESET signal (active low)
+
+            config SERIAL_HANDLER_GPIO_RXD
+                int "GPIO pin for the RxD signal"
+                default 6
+                help
+                    GPIO pin for UART receive (RxD) from target
+
+            config SERIAL_HANDLER_GPIO_TXD
+                int "GPIO pin for the TxD signal"
+                default 5
+                help
+                    GPIO pin for UART transmit (TxD) to target
+
+        endmenu
+
+        menu "Status LED"
+
+            config BRIDGE_LED_ENABLE
+                bool "Enable the WS2812 status LED"
+                default n
+                help
+                    Enables the (optionally wired) WS2812 status LED.
+
+                    While disabled there is no LED pin at all: the pin option below is
+                    not offered, no pin is configured, driven or reset, and the LED
+                    helpers compile to stubs. Leaving it off is the safe default,
+                    because a pin number that does not match the board cannot disturb
+                    anything then.
+
+                    No driver is implemented yet: enabling this only lets led_rgb_init()
+                    validate the reserved pin. The status LED work item covers the RMT
+                    based driver.
+
+            config BRIDGE_WS2812_GPIO
+                int "GPIO reserved for a WS2812 status LED (-1 = none)"
+                default -1
+                depends on BRIDGE_LED_ENABLE
+                help
+                    GPIO number reserved for an addressable RGB status LED (WS2812/WS2812B),
+                    or -1 to reserve nothing.
+
+                    No driver is implemented yet: this option only records the intent and
+                    led_rgb_init() merely validates the pin. The pin is left in its reset
+                    state - it is never configured, driven or pulsed - so naming a pin on a
+                    board without such an LED does not disturb anything either.
+
+                    led_rgb_init() rejects a pin outside the chip's GPIO range, and a pin
+                    already used by the target UART or the debug probe.
+
+                    The eventual driver needs a peripheral that can emit 800 kHz pulse
+                    trains (RMT is the usual choice), plus a 5 V supply and level shifting
+                    on most WS2812 parts.
+
+        endmenu
+
+    endmenu
+
+    # ========================================================= wireless link
+
+    menu "Wireless link"
+
+        config WLINK_CHANNEL
+            int "Wi-Fi channel used by the bridge link"
+            range 1 13
+            default 1
+            help
+                Both devices of a wireless bridge pair must use the same channel.
+                The channel is fixed at start-up instead of following the station
+                configuration, so the link also works when no access point is around.
+
+        config WLINK_SWD_TIMEOUT_MS
+            int "CMSIS-DAP response timeout (ms)"
+            default 250
+            help
+                How long the wireless host waits for a DAP response from the slave
+                before retransmitting the request.
+
+        config WLINK_SWD_RETRIES
+            int "CMSIS-DAP request retransmissions"
+            range 1 10
+            default 3
+            help
+                Number of times a DAP request is (re)sent before the relay gives up.
+                Giving up lets OpenOCD time out and retry at a higher level.
+
+        config WLINK_PEER_WAIT_MS
+            int "How long the wireless host waits for the link to pair (ms)"
+            default 2000
+            help
+                A board that has just been reset does not know its peer yet, while the
+                host tool sends its first command as soon as the USB device enumerates
+                and gives up if that command is not answered. Before sending a DAP
+                request the relay waits up to this long for the link to pair, so the
+                request can go out as an acknowledged unicast frame.
+
+                After the wait the request is still sent (as a broadcast, which the
+                slave receives as well), so this only trades a little latency at
+                start-up for reliability.
+
+    endmenu
+
+    # ========================================================== USB identity
+
+    menu "USB identity"
+
+        config BRIDGE_USB_VID
+            hex "USB vendor ID"
+            default 0x303A
+            help
+                USB Vendor ID for the bridge device
+
+        config BRIDGE_USB_PID
+            hex "USB product ID"
+            default 0x1002
+            help
+                USB Product ID for the bridge device
+
+        config BRIDGE_MANUFACTURER
+            string "USB bridge manufacturer"
+            default "Espressif Systems Co. Ltd."
+            help
+                Manufacturer string shown in USB device descriptor
+
+        config BRIDGE_PRODUCT_NAME
+            string "USB product name"
+            default "ESP USB Bridge"
+            help
+                Product name string shown in USB device descriptor
+
+        config BRIDGE_MSC_VOLUME_LABEL
+            string "Volume label shown in the MSC disc"
+            default "ESPPROG_MSC"
+            help
+                Volume label shown in the MSC disc. Max length is 11 ASCII characters.
+
+        config BRIDGE_DOWNLOAD_MAGIC_BAUD
+            int "Magic baud rate to enter download mode"
+            default 1200
+            help
+                When the host sets the CDC serial port to this baud rate, download
+                mode reset is armed. Closing the port (clearing DTR) then resets the
+                bridge chip (ESP32-S2 or ESP32-S3) into download mode so its firmware
+                can be updated over USB. Do not use this baud for normal target
+                serial traffic; any DTR clear while armed triggers bridge download
+                mode. Prefer a baud that host tools will not use for the target.
+                Set to 0 to disable.
+
+    endmenu
+
+    # ================================================================= debug
+
+    menu "Debug"
+
+        config WLINK_SWD_VERBOSE_LOG
+            bool "Log every CMSIS-DAP packet on the SWD path at info level"
+            default n
+            help
+                Logs each DAP request, each retransmission, each cache hit and each
+                response at info level instead of debug level.
+
+                Useful when diagnosing the wireless SWD path, because the host board's
+                console is not always easy to reach. Keep it off for normal use: a debug
+                session with a live watch can send hundreds of DAP commands per second,
+                and the serial console is far slower than that, so the logging itself
+                would slow the link down.
+
+        config WLINK_DEBUG_LINK_TEST
+            bool "Debug: send a link test line from the slave every second"
+            default n
+            depends on !BRIDGE_ROLE_WIRED
+            help
+                Debug aid for the wireless link itself.
+
+                When enabled, the wireless slave sends the text "connected N" (N counting
+                up from 1) to the host once per second, as soon as it has discovered its
+                peer. The line travels as WLINK_MSG_SERIAL, so it takes exactly the same
+                path as the tunnelled UART data: it shows up on the serial port of the USB
+                side and is also logged on the slave console.
+
+                A silent serial port therefore means the link is not paired (or the slave
+                is not sending), while one line per second proves the whole path, not just
+                the radio. Turn this off for normal use: the test text is injected into the
+                UART tunnel and the log costs one line per second.
+
+                Only the slave sends; enabling it on the host build only reports that the
+                host has nothing to send.
+
+    endmenu
 
 endmenu

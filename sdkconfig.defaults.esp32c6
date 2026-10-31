@@ -31,12 +31,12 @@ CONFIG_SERIAL_HANDLER_GPIO_TXD=7
 # it when the board changes: GPIO 8/9/15 are strapping pins on the C6, so a
 # different carrier board may sample different levels at reset.
 
-# No status LED pins here: CONFIG_BRIDGE_LED_ENABLE is off by default and the pins on
-# this verified board are not connected to LEDs anyway. Enable it in menuconfig and
-# set the pins once the LED wiring of a board is known.
+# No status LED is enabled here: CONFIG_BRIDGE_LED_ENABLE is off by default and this
+# verified board has no LED wired anyway. Enable it in menuconfig
+# ("END-config -> Pin configuration -> Status LED") and set the pin once the wiring is known.
 
 # Debug aids, deliberately off in the defaults (enable per build in menuconfig,
-# "Wireless Link Configuration"):
+# "END-config -> Debug"; channel and timeouts live in "END-config -> Wireless link"):
 #   CONFIG_WLINK_SWD_VERBOSE_LOG=y   log every CMSIS-DAP packet (queued / seq N sent)
 #   CONFIG_WLINK_DEBUG_LINK_TEST=y   slave sends "connected N" once per second
 # They stay off by default because the link test writes into the target's serial

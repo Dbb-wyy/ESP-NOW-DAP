@@ -11,7 +11,7 @@ The wired behaviour of the project is unchanged.
 ## 1. Roles
 
 The firmware implements one end of the bridge at a time. The role is selected in
-`Bridge Configuration -> Bridge role` and therefore a **separate image is built and
+`END-config -> Role configuration -> Firmware role` and therefore a **separate image is built and
 flashed on each of the two boards**.
 
 | Role | Sits next to | USB | Target pins | ESP-NOW |
@@ -20,7 +20,7 @@ flashed on each of the two boards**.
 | `Wireless host` | the PC | CDC (serial) + vendor bulk (CMSIS-DAP) | none | relays both streams |
 | `Wireless slave` | the target board | **none** | UART, SWD (SWCLK/SWDIO), BOOT/RST | terminates both streams |
 
-Both wireless roles require `Debug Probe Configuration -> Debug interface -> CMSIS-DAP SWD`.
+Both wireless roles require `END-config -> Role configuration -> Debug interface -> CMSIS-DAP SWD`.
 The build fails with an explicit `#error` in `main/bridge_glue.c` otherwise.
 
 ---

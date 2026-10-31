@@ -24,9 +24,9 @@ CONFIG_SERIAL_HANDLER_GPIO_RST=7
 CONFIG_SERIAL_HANDLER_GPIO_RXD=6
 CONFIG_SERIAL_HANDLER_GPIO_TXD=5
 
-# No status LED pins here: CONFIG_BRIDGE_LED_ENABLE defaults to off and the LED pins
-# are then never configured, so the module's own pinout is left alone. Enable it in
-# menuconfig ("Bridge Configuration") once the LED wiring of a board is known.
+# No status LED is enabled here: CONFIG_BRIDGE_LED_ENABLE defaults to off, so no LED pin
+# is configured and the module's own pinout is left alone. Enable it in menuconfig
+# ("END-config -> Pin configuration -> Status LED") once the LED wiring of a board is known.
 #
 # USB identity.
 CONFIG_BRIDGE_USB_VID=0x303A

@@ -9,11 +9,9 @@
 #include "util.h"
 #include "esp_log.h"
 #include "esp_cpu.h"
-#include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "bridge_glue.h"
-#include "led_io.h"
 #include "led_rgb.h"
 
 #if !CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE
@@ -152,7 +150,6 @@ void tud_mount_cb(void)
     }
 
     eub_vendord_start();
-    bridge_probe_register_activity_callback(bridge_led_debug);
 }
 
 static void init_serial_no(void)
@@ -215,32 +212,6 @@ static void tusb_device_task(void *pvParameters)
 
 #endif /* !CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE */
 
-static void init_led_gpios(void)
-{
-#if CONFIG_BRIDGE_LED_ENABLE
-    gpio_config_t io_conf = {};
-    io_conf.intr_type = GPIO_INTR_DISABLE;
-    io_conf.mode = GPIO_MODE_OUTPUT;
-    io_conf.pin_bit_mask = (1ULL << CONFIG_BRIDGE_GPIO_LED1) | (1ULL << CONFIG_BRIDGE_GPIO_LED2) |
-                           (1ULL << CONFIG_BRIDGE_GPIO_LED3);
-    io_conf.pull_down_en = 0;
-    io_conf.pull_up_en = 0;
-    ESP_ERROR_CHECK(gpio_config(&io_conf));
-
-    gpio_set_level(CONFIG_BRIDGE_GPIO_LED1, !CONFIG_BRIDGE_GPIO_LED1_ACTIVE);
-    gpio_set_level(CONFIG_BRIDGE_GPIO_LED2, !CONFIG_BRIDGE_GPIO_LED2_ACTIVE);
-    gpio_set_level(CONFIG_BRIDGE_GPIO_LED3, !CONFIG_BRIDGE_GPIO_LED3_ACTIVE);
-
-    ESP_LOGI(TAG, "LED GPIO init done");
-#else
-    /* Deliberately no gpio_config()/gpio_set_level()/gpio_reset_pin() here: the LED
-       wiring is not known to be present, and on some chips (see the C3 defaults) the
-       pins carry the in-package flash. Leaving them in their reset state is the only
-       safe choice. */
-    ESP_LOGI(TAG, "Status LEDs disabled (CONFIG_BRIDGE_LED_ENABLE=n), LED pins left untouched");
-#endif
-}
-
 #if !CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE
 static void start_usb_device(void)
 {
@@ -261,15 +232,12 @@ static void start_usb_device(void)
 
 void app_main(void)
 {
-    /* Status LEDs are optional and off by default; when enabled, setting them up first
-       is what makes the eub_abort() pattern visible. */
-    init_led_gpios();
-
-    /* Validates CONFIG_BRIDGE_WS2812_GPIO and, for now, only records it: the WS2812
-       pin is intentionally left in its reset state until a driver exists. A rejected
-       pin (range or collision) must not keep the bridge from running. */
+    /* The optional status LED. With CONFIG_BRIDGE_LED_ENABLE=n this is a stub that only
+       logs, so no pin is ever configured. When enabled it validates the reserved WS2812
+       pin and, for now, records it without driving anything: a rejected pin (range or
+       collision) must not keep the bridge from running. */
     if (led_rgb_init() != ESP_OK) {
-        ESP_LOGW(TAG, "WS2812 status LED reservation rejected, continuing without it");
+        ESP_LOGW(TAG, "Status LED configuration rejected, continuing without it");
     }
 
 #if !CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE

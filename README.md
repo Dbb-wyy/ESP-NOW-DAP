@@ -21,7 +21,7 @@ ESP-NOW-DAP 通过 USB 线连接时，会向 PC 呈现一个 USB 复合设备，
 编译需要 [ESP-IDF](https://github.com/espressif/esp-idf) v5.0 或更新版本，请先阅读 ESP-IDF 文档完成环境搭建。
 
 - `idf.py set-target` 用于选择目标芯片，目前支持 ESP32-S2 与 ESP32-S3。
-- `idf.py menuconfig` 用于修改配置，本项目相关的设置在 **Bridge Configuration** 子菜单下。
+- `idf.py menuconfig` 用于修改配置，本项目相关的设置在 **END-config** 子菜单下。
 - `idf.py build` 编译固件。
 - `idf.py -p PORT flash monitor` 烧录并打开串口监视器。注意这里的 PORT 是连接桥接芯片串口（不是芯片原生 USB 口）的 USB 转串口芯片所创建的串口，仅在烧录时需要。烧录完成后，桥接芯片可以通过 USB 口工作。
 
@@ -31,13 +31,13 @@ ESP-NOW-DAP 通过 USB 线连接时，会向 PC 呈现一个 USB 复合设备，
 
 ### 编译无线角色
 
-`Bridge Configuration -> Bridge role` 决定这份固件实现桥的哪一端。默认是 wired 角色，所以直接 `idf.py build` 得到的仍是原来的单板固件。
+`END-config -> Role configuration -> Firmware role` 决定这份固件实现桥的哪一端。默认是 wired 角色，所以直接 `idf.py build` 得到的仍是原来的单板固件。
 
 **一次只编一个角色** —— 在 menuconfig 里选好角色后正常编译：
 
 ```bash
 idf.py set-target esp32s3
-idf.py menuconfig      # Bridge Configuration -> Bridge role
+idf.py menuconfig      # END-config -> Role configuration -> Firmware role
 idf.py build
 ```
 
@@ -123,7 +123,7 @@ openocd -s tcl -f interface/cmsis-dap.cfg -f target/<target.cfg>.cfg -c 'adapter
 
 - **无线主机**插在 PC 上。它的 USB CDC 口与 CMSIS-DAP bulk 接口会被转发到链路上。
 - **无线从机**与目标的串口、SWD（SWCLK/SWDIO）以及 BOOT/RST 引脚相连。它完全不使用自己的 USB 口。
-- 两块板子会自动配对，并且必须设置成相同的 `Wireless Link Configuration -> Wi-Fi channel`（默认 1）。不需要按键或绑定流程。
+- 两块板子会自动配对，并且必须设置成相同的 `END-config -> Wireless link -> Wi-Fi channel`（默认 1）。不需要按键或绑定流程。
 
 `esptool`、`idf.py monitor` 与 OpenOCD 的用法和 wired 模式完全一样：CDC 的 line coding 与 DTR/RTS 复位时序都会被隧道到从机，因此目标可以在 PC 侧不做任何改动的情况下被烧录和调试。
 
@@ -193,7 +193,7 @@ Building requires [ESP-IDF](https://github.com/espressif/esp-idf) v5.0 or newer.
 read the ESP-IDF documentation to set up the environment first.
 
 - `idf.py set-target` selects the target chip; ESP32-S2 and ESP32-S3 are supported at the moment.
-- `idf.py menuconfig` changes the configuration; the settings related to this project are under the **Bridge Configuration** sub-menu.
+- `idf.py menuconfig` changes the configuration; the settings related to this project are under the **END-config** sub-menu.
 - `idf.py build` builds the firmware.
 - `idf.py -p PORT flash monitor` flashes the firmware and opens the serial monitor. Note that PORT is the serial port created by the USB-to-serial chip connected to the bridge chip's serial port (not the chip's native USB port), and is needed only for flashing. After flashing, the bridge chip can work through the USB port.
 
@@ -204,7 +204,7 @@ a plain `idf.py build` and every wireless role build start from the same hardwar
 
 ### Building the wireless roles
 
-`Bridge Configuration -> Bridge role` selects which end of the bridge the firmware
+`END-config -> Role configuration -> Firmware role` selects which end of the bridge the firmware
 implements. The wired role is the default, so a plain `idf.py build` still produces
 the original single-board firmware.
 
@@ -212,7 +212,7 @@ the original single-board firmware.
 
 ```bash
 idf.py set-target esp32s3
-idf.py menuconfig      # Bridge Configuration -> Bridge role
+idf.py menuconfig      # END-config -> Role configuration -> Firmware role
 idf.py build
 ```
 
@@ -318,7 +318,7 @@ the same time.
 - The **wireless slave** is wired to the target's UART, SWD (SWCLK/SWDIO) and
   BOOT/RST pins. It does not use its USB port at all.
 - The two boards pair automatically and must be set to the same
-  `Wireless Link Configuration -> Wi-Fi channel` (default 1). No button or binding
+  `END-config -> Wireless link -> Wi-Fi channel` (default 1). No button or binding
   procedure is involved.
 
 `esptool`, `idf.py monitor` and OpenOCD are used exactly as in wired mode: the

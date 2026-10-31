@@ -15,13 +15,23 @@
 
 static const char *TAG = "led_rgb";
 
+/*
+ * The gate is CONFIG_BRIDGE_LED_ENABLE, deliberately not the pin: CONFIG_BRIDGE_WS2812_GPIO
+ * depends on it, so the pin symbol is *undefined* when the LED is disabled. Testing
+ * "#if CONFIG_BRIDGE_WS2812_GPIO >= 0" would then be a comparison of 0 against 0 and
+ * would compile the enabled implementation anyway.
+ */
+#if CONFIG_BRIDGE_LED_ENABLE
+
+#define LED_RGB_PIN CONFIG_BRIDGE_WS2812_GPIO
+
 /* The reserved pin is recorded but never claimed: no gpio_config(), no
    gpio_set_level(), no gpio_reset_pin(). Keeping it untouched is the whole point
    of this module until the RMT based driver is finished. */
 static int s_pin = -1;
 static bool s_rejected;
 
-#if CONFIG_BRIDGE_WS2812_GPIO >= 0
+#if LED_RGB_PIN >= 0
 /* Pins the rest of the firmware drives. A collision would make a status LED fight
    a functional signal (the C3 in-package flash pins are exactly this failure), so a
    hit is reported as a configuration error instead of being driven anyway. */
@@ -39,17 +49,12 @@ static const struct {
     { "CONFIG_DEBUG_PROBE_GPIO_TDI", CONFIG_DEBUG_PROBE_GPIO_TDI },
     { "CONFIG_DEBUG_PROBE_GPIO_TDO", CONFIG_DEBUG_PROBE_GPIO_TDO },
 #endif
-#if CONFIG_BRIDGE_LED_ENABLE
-    { "CONFIG_BRIDGE_GPIO_LED1", CONFIG_BRIDGE_GPIO_LED1 },
-    { "CONFIG_BRIDGE_GPIO_LED2", CONFIG_BRIDGE_GPIO_LED2 },
-    { "CONFIG_BRIDGE_GPIO_LED3", CONFIG_BRIDGE_GPIO_LED3 },
-#endif
 };
-#endif /* CONFIG_BRIDGE_WS2812_GPIO >= 0 */
+#endif /* LED_RGB_PIN >= 0 */
 
 esp_err_t led_rgb_init(void)
 {
-    const int pin = CONFIG_BRIDGE_WS2812_GPIO;
+    const int pin = LED_RGB_PIN;
 
     if (pin < 0) {
         ESP_LOGI(TAG, "No WS2812 status LED reserved (CONFIG_BRIDGE_WS2812_GPIO=-1)");
@@ -63,8 +68,8 @@ esp_err_t led_rgb_init(void)
         return ESP_ERR_INVALID_ARG;
     }
 
-#if CONFIG_BRIDGE_WS2812_GPIO >= 0
-    for (size_t i = 0; i < sizeof(s_used_pins) / sizeof(s_used_pins[0]); ++i) {
+#if LED_RGB_PIN >= 0
+    for (size_t i = 0; i < sizeof(s_used_pins) / sizeof(s_used_pins[0]); i++) {
         if (s_used_pins[i].pin == pin) {
             ESP_LOGE(TAG, "CONFIG_BRIDGE_WS2812_GPIO=%d collides with %s",
                      pin, s_used_pins[i].name);
@@ -113,3 +118,32 @@ esp_err_t led_rgb_off(void)
 {
     return led_rgb_set(0, 0, 0);
 }
+
+#else /* !CONFIG_BRIDGE_LED_ENABLE */
+
+esp_err_t led_rgb_init(void)
+{
+    /* No pin is reserved, so there is nothing to validate and nothing to touch. */
+    ESP_LOGI(TAG, "Status LED disabled (CONFIG_BRIDGE_LED_ENABLE=n), no LED pin is reserved or driven");
+    return ESP_OK;
+}
+
+bool led_rgb_is_available(void)
+{
+    return false;
+}
+
+esp_err_t led_rgb_set(uint8_t red, uint8_t green, uint8_t blue)
+{
+    (void)red;
+    (void)green;
+    (void)blue;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+esp_err_t led_rgb_off(void)
+{
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+#endif /* CONFIG_BRIDGE_LED_ENABLE */

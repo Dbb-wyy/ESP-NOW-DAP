@@ -35,20 +35,6 @@
 extern "C" {
 #endif
 
-/* ------------------------------------------------------------------ status LEDs */
-
-/* The three helpers below are compiled to empty stubs unless CONFIG_BRIDGE_LED_ENABLE
-   is set, so call sites never need to care whether the board has LEDs. */
-
-/** Serial TX activity -> LED_RX (swapped so the LED shows bridge-to-target traffic). */
-void bridge_led_serial_tx(bool active);
-
-/** Serial RX activity -> LED_TX. */
-void bridge_led_serial_rx(bool active);
-
-/** Debug probe activity -> LED_JTAG. */
-void bridge_led_debug(bool active);
-
 /* ------------------------------------------------------------------ serial uplink */
 
 /**
