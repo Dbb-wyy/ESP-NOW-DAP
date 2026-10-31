@@ -142,6 +142,38 @@ idf.py -p /dev/ttyACMx monitor
 还没做过严谨的无线测试。目前只试过主机放“电梯口”、从机放“实验室”，能正常烧录。（乐）
 具体通信速度、距离上限和穿墙能力待测。
 
+## 状态灯
+
+可选的一颗 WS2812（灯带上的第一颗也可以）用来显示桥在做什么，主机与从机的判定标准完全一致：
+
+| 状态 | 颜色 | 效果 |
+| --- | --- | --- |
+| ESP-NOW 未连接 | 黄 255,180,0 | 闪 |
+| SWD 与串口同时在用 | 紫 140,0,255 | 闪 |
+| 只用 SWD | 蓝 0,80,255 | 闪 |
+| 只用串口 | 绿 0,255,60 | 闪 |
+| 已连接、空闲 | 青 0,180,180 | 呼吸 |
+
+优先级从上往下：断开时的黄色压过一切，“两路都在用”压过单路。所以上电后还没配对时看到的是黄闪，
+配对成功、两路都安静下来之后转成青呼吸。
+
+默认不启用，启用步骤如下：
+
+```
+idf.py menuconfig
+END-config -> Pin configuration -> Status LED
+  [*] Enable the WS2812 status LED
+  (-1) GPIO connected to the WS2812 data input (-1 = none)   <- 填实际引脚
+```
+
+引脚留 `-1` 等于关灯，这是默认值：LED 引脚因板而异，填错的数字会去驱动别的功能脚。
+填成已经分配给 UART、BOOT/RST 或 SWD 的引脚会被 `led_rgb_init()` 拒绝并打日志，桥本身照常工作。
+其余观感参数（整体亮度、活动保持时间、闪烁周期与亮占比、呼吸周期与最暗百分比）都在同一个菜单里，
+可按实际板子调；链路判定超时在 `END-config -> Wireless link -> Peer timeout`。
+驱动使用托管组件 `espressif/led_strip`（RMT 后端），由组件管理器自动拉取。
+
+wired 角色不支持状态灯：该选项被 `depends on !BRIDGE_ROLE_WIRED` 关掉，打开它只有无线两个角色可用。
+
 ## 许可证
 
 本项目基于 Apache License 2.0 授权，见 [LICENSE](LICENSE)。
@@ -341,6 +373,43 @@ limitations are documented in [docs/wireless.md](docs/wireless.md).
 
 Not rigorously tested yet. So far we've only tried the host at the “elevator entrance” and the slave in the “lab”, and flashing works. (heh)
 Actual throughput, maximum range, and wall penetration remain to be measured.
+
+## Status LED
+
+An optional WS2812 (the first LED of a strip is fine) reports what the bridge is doing. The
+host and the slave use exactly the same rules:
+
+| State | Colour | Effect |
+| --- | --- | --- |
+| ESP-NOW link down | yellow 255,180,0 | flashing |
+| SWD and serial both in use | violet 140,0,255 | flashing |
+| SWD only | blue 0,80,255 | flashing |
+| serial only | green 0,255,60 | flashing |
+| link up, idle | cyan 0,180,180 | breathing |
+
+The table is also the priority order: "down" outranks everything and "both busy" outranks a
+single stream. So right after power-up, before the pair exists, the LED flashes yellow; once
+the peer is found and the link falls quiet it settles into the cyan breathing.
+
+Disabled by default:
+
+```
+idf.py menuconfig
+END-config -> Pin configuration -> Status LED
+  [*] Enable the WS2812 status LED
+  (-1) GPIO connected to the WS2812 data input (-1 = none)   <- set the real pin
+```
+
+Leaving the pin at `-1` drives nothing, which is the default on purpose: the LED pin is a
+per-board choice and a wrong number would drive a pin that carries something else. A pin that
+is already used by the UART, BOOT/RST or SWD is rejected by `led_rgb_init()` with a log line,
+and the bridge keeps running. Brightness, the activity window, the blink period and duty, and
+the breathing period and floor are all in the same menu; the link timeout lives in
+`END-config -> Wireless link -> Peer timeout`. The driver is the managed component
+`espressif/led_strip` (RMT backend), fetched by the component manager.
+
+The wired role has no status LED: the option is behind `depends on !BRIDGE_ROLE_WIRED`, so it
+is only available to the two wireless roles.
 
 ## License
 

@@ -164,12 +164,14 @@ link: baud rate changes and the reset dance are tunneled transparently.
 | Symbol | Where | Notes |
 |---|---|---|
 | `CONFIG_BRIDGE_ROLE_*` | `main/Kconfig.projbuild` | role of this image |
-| `CONFIG_WLINK_CHANNEL` | `components/wireless_link/Kconfig` | must match on both boards |
+| `CONFIG_WLINK_CHANNEL` | `main/Kconfig.projbuild` | must match on both boards |
 | `CONFIG_WLINK_PEER_WAIT_MS` | ditto | how long the host waits for pairing before sending anyway |
 | `CONFIG_WLINK_SWD_TIMEOUT_MS` | ditto | per-attempt DAP response timeout |
 | `CONFIG_WLINK_SWD_RETRIES` | ditto | request retransmissions before giving up |
 | `CONFIG_WLINK_SWD_VERBOSE_LOG` | ditto | promote per-packet SWD relay logs from debug to info |
+| `CONFIG_WLINK_PEER_TIMEOUT_MS` | ditto | silence after which the link counts as down (status LED only) |
 | `CONFIG_WLINK_DEBUG_LINK_TEST` | ditto | debug only: slave sends `connected N` every second |
+| `CONFIG_BRIDGE_LED_ENABLE` | ditto | optional WS2812 status LED, see the README |
 | `CONFIG_DEBUG_PROBE_GPIO_TCK/TMS` | `sdkconfig.defaults.esp32s3` | SWCLK / SWDIO |
 | `CONFIG_SERIAL_HANDLER_GPIO_*` | `sdkconfig.defaults.esp32s3` | target UART + BOOT/RST |
 

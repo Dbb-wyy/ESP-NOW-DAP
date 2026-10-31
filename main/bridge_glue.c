@@ -21,6 +21,7 @@
 #include "bridge_glue.h"
 #include "serial_bridge.h"
 #include "serial_handler.h"
+#include "led_rgb.h"
 
 #if !CONFIG_BRIDGE_ROLE_WIRED
 #include "wireless_link.h"
@@ -140,6 +141,8 @@ static esp_err_t bridge_apply_line_state(bool dtr, bool rts)
 
 static void bridge_on_uart_data(const uint8_t *data, size_t len)
 {
+    led_rgb_notify_activity(LED_RGB_ACT_SERIAL);
+
 #if CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE
     wlink_send(WLINK_MSG_SERIAL, 0, 0, data, len);
 #else
@@ -234,6 +237,8 @@ static void bridge_swd_seq_drop_last(void)
 /* Runs in the Wi-Fi task: only queues the request, the DAP engine runs in its own task. */
 static void bridge_slave_swd_rx(const wlink_hdr_t *hdr, const uint8_t *payload, size_t len)
 {
+    led_rgb_notify_activity(LED_RGB_ACT_SWD);
+
     if (len == 0 || len > BRIDGE_SWD_PKT_SIZE) {
         ESP_LOGW(TAG, "DAP request seq %u has an unusable length (%u bytes), dropped",
                  hdr->seq, (unsigned)len);
@@ -453,6 +458,8 @@ static bool s_host_probe_started;
 /* Runs in the Wi-Fi task: hand the DAP answer over to the USB IN task. */
 static void bridge_host_swd_rx(const wlink_hdr_t *hdr, const uint8_t *payload, size_t len)
 {
+    led_rgb_notify_activity(LED_RGB_ACT_SWD);
+
     if (!s_host_probe_started) {
         return;
     }
@@ -514,6 +521,8 @@ static void bridge_host_swd_relay_task(void *arg)
         const uint8_t seq = wlink_next_seq();
         s_host_swd_tx_seq = seq;
 
+        led_rgb_notify_activity(LED_RGB_ACT_SWD);
+
         /*
          * Even without a peer the frame is still sent, as a broadcast, which the slave
          * receives as well. So fall through here rather than dropping the request.
@@ -553,12 +562,25 @@ static void bridge_host_swd_relay_task(void *arg)
 
 static void bridge_on_link_serial(const wlink_hdr_t *hdr, const uint8_t *payload, size_t len)
 {
+    led_rgb_notify_activity(LED_RGB_ACT_SERIAL);
+
 #if CONFIG_BRIDGE_ROLE_WIRELESS_HOST
     serial_bridge_target_data_received(payload, len);
 #else
     serial_handler_send_data(payload, len);
 #endif
 }
+
+/*
+ * The status LED pulls the link state instead of being told about it, so nothing has to
+ * hook into the ESP-NOW callbacks. wlink_link_up() is a passive observation with its own
+ * timeout: wlink_peer_ready() must keep meaning "the MAC is known", because the SWD
+ * stop-and-wait logic depends on that and would otherwise start flapping.
+ */
+static const led_rgb_link_ops_t k_led_link_ops = {
+    .link_up = wlink_link_up,
+    .peer_last_seen_ms = wlink_peer_last_seen_ms,
+};
 
 #endif /* !CONFIG_BRIDGE_ROLE_WIRED */
 
@@ -596,6 +618,9 @@ esp_err_t bridge_uplink_init(void)
         ESP_LOGE(TAG, "Wireless link init failed: %s", esp_err_to_name(err));
         return err;
     }
+
+    /* From here on the status LED can tell an unpaired link from a paired one. */
+    led_rgb_set_link_ops(&k_led_link_ops);
 
     err = wlink_register_rx(WLINK_MSG_SERIAL, bridge_on_link_serial);
     if (err != ESP_OK) {
@@ -647,6 +672,8 @@ esp_err_t bridge_uplink_init(void)
 
 esp_err_t bridge_serial_send(const uint8_t *data, size_t len)
 {
+    led_rgb_notify_activity(LED_RGB_ACT_SERIAL);
+
 #if CONFIG_BRIDGE_ROLE_WIRELESS_HOST
     if (!wlink_peer_ready()) {
         ESP_LOGD(TAG, "No peer yet, %u serial bytes dropped", (unsigned)len);

@@ -99,6 +99,24 @@ bool wlink_peer_ready(void);
 /** @brief Copy the peer MAC address into @p out (6 bytes). */
 void wlink_peer_mac(uint8_t out[6]);
 
+/**
+ * @brief Whether frames have been received from the peer recently.
+ *
+ * This is a passive observation for the status LED: it is true while a discovered peer
+ * keeps sending beacons or payload, and it turns false CONFIG_WLINK_PEER_TIMEOUT_MS after
+ * the last frame. It is deliberately *not* what wlink_peer_ready() means - that one only
+ * reports whether the MAC is known and it drives the SWD stop-and-wait retransmission, so
+ * it must not start flapping when the peer goes quiet.
+ *
+ * @return true while the link looks alive.
+ */
+bool wlink_link_up(void);
+
+/**
+ * @brief Milliseconds since the last frame from the peer, 0 when none was ever received.
+ */
+uint32_t wlink_peer_last_seen_ms(void);
+
 /** @brief Get the next sequence number for a message type. */
 uint8_t wlink_next_seq(void);
 

@@ -93,7 +93,7 @@ static inline void led_rgb_notify_activity(led_rgb_activity_t act) { (void)act; 
 #endif
 
 /**
- * @brief Show one colour for LED_RGB_MANUAL_HOLD_MS and then resume the state machine.
+ * @brief Show one colour for about a second, then resume the state machine.
  *
  * @return ESP_OK, or ESP_ERR_INVALID_STATE when the LED is not available.
  */

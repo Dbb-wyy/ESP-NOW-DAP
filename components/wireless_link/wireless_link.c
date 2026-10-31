@@ -36,6 +36,22 @@ static volatile bool s_peer_ready;
 static uint8_t s_seq;
 static esp_timer_handle_t s_beacon_timer;
 
+/*
+ * Liveness of the link, kept only for the status LED.
+ *
+ * s_peer_ready answers "do we know where the peer is", which stays true across a long
+ * silence and drives the SWD retransmission. The LED needs the other question - "was the
+ * peer heard from recently" - so the receive callback stamps every frame that comes from
+ * the peer MAC and the timeout is applied when somebody asks. 0 means "never heard from";
+ * real stamps are ORed with 1 so they can never collide with it.
+ */
+static volatile uint32_t s_peer_last_seen_ms;
+
+static uint32_t wlink_now_ms(void)
+{
+    return (uint32_t)(esp_timer_get_time() / 1000);
+}
+
 #if CONFIG_WLINK_DEBUG_LINK_TEST
 static esp_err_t wlink_start_debug_task(void);
 #endif
@@ -69,6 +85,7 @@ static void wlink_learn_peer(const uint8_t mac[ESP_NOW_ETH_ALEN])
 
     memcpy(s_peer_mac, mac, ESP_NOW_ETH_ALEN);
     s_peer_ready = true;
+    s_peer_last_seen_ms = wlink_now_ms() | 1u;
 
     /*
      * Keep beaconing once the peer is known.
@@ -103,6 +120,11 @@ static void wlink_recv_cb(const esp_now_recv_info_t *info, const uint8_t *data, 
 
     if (!s_peer_ready && info->src_addr) {
         wlink_learn_peer(info->src_addr);
+    }
+
+    /* Every frame from the peer, beacons included, proves the link is still alive. */
+    if (s_peer_ready && info->src_addr && memcmp(info->src_addr, s_peer_mac, ESP_NOW_ETH_ALEN) == 0) {
+        s_peer_last_seen_ms = wlink_now_ms() | 1u;
     }
 
     if (hdr->type == WLINK_MSG_BEACON || hdr->type >= WLINK_MSG_MAX) {
@@ -328,6 +350,29 @@ bool wlink_peer_ready(void)
 void wlink_peer_mac(uint8_t out[6])
 {
     memcpy(out, s_peer_mac, ESP_NOW_ETH_ALEN);
+}
+
+bool wlink_link_up(void)
+{
+    const uint32_t last = s_peer_last_seen_ms;
+
+    if (!s_peer_ready || last == 0) {
+        return false;
+    }
+
+    /* Unsigned difference, so it stays correct when the millisecond counter wraps. */
+    return (wlink_now_ms() - last) < CONFIG_WLINK_PEER_TIMEOUT_MS;
+}
+
+uint32_t wlink_peer_last_seen_ms(void)
+{
+    const uint32_t last = s_peer_last_seen_ms;
+
+    if (last == 0) {
+        return 0;
+    }
+
+    return wlink_now_ms() - last;
 }
 
 uint8_t wlink_next_seq(void)
