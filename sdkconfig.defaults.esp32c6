@@ -15,19 +15,31 @@ CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
 # Debug probe: CMSIS-DAP over SWD. The USB-JTAG interface is not available on this
 # target, so SWD has to be selected explicitly (the component default is JTAG).
 CONFIG_DEBUG_PROBE_IFACE_SWD=y
-CONFIG_DEBUG_PROBE_GPIO_TCK=10
-CONFIG_DEBUG_PROBE_GPIO_TMS=11
+CONFIG_DEBUG_PROBE_GPIO_TCK=4
+CONFIG_DEBUG_PROBE_GPIO_TMS=5
 # TDI/TDO are JTAG-only signals and are not driven in SWD mode, so they keep the
-# component defaults (3/9). GPIO 8/9/15 are strapping pins on this chip.
+# component defaults (3/9).
 
 # Target UART and reset lines.
-CONFIG_SERIAL_HANDLER_GPIO_BOOT=6
-CONFIG_SERIAL_HANDLER_GPIO_RST=7
-CONFIG_SERIAL_HANDLER_GPIO_RXD=5
-CONFIG_SERIAL_HANDLER_GPIO_TXD=4
+CONFIG_SERIAL_HANDLER_GPIO_BOOT=8
+CONFIG_SERIAL_HANDLER_GPIO_RST=9
+CONFIG_SERIAL_HANDLER_GPIO_RXD=6
+CONFIG_SERIAL_HANDLER_GPIO_TXD=7
 
-# Status LEDs on 18/19/20: GPIO 8/9/15 are strapping pins, GPIO 12/13 are the
-# USB Serial/JTAG pins, and all of them stay free for their own purpose.
+# Pin map above is the one that was verified on the actual C6 slave board during
+# stage 3 (SWCLK=4, SWDIO=5, target TXD=7, target RXD=6, BOOT=8, RST=9). Re-check
+# it when the board changes: GPIO 8/9/15 are strapping pins on the C6, so a
+# different carrier board may sample different levels at reset.
+
+# Status LEDs on 18/19/20: GPIO 12/13 are the USB Serial/JTAG pins on this chip and
+# are left free for that purpose.
 CONFIG_BRIDGE_GPIO_LED1=18
 CONFIG_BRIDGE_GPIO_LED2=19
 CONFIG_BRIDGE_GPIO_LED3=20
+
+# Debug aids, deliberately off in the defaults (enable per build in menuconfig,
+# "Wireless Link Configuration"):
+#   CONFIG_WLINK_SWD_VERBOSE_LOG=y   log every CMSIS-DAP packet (queued / seq N sent)
+#   CONFIG_WLINK_DEBUG_LINK_TEST=y   slave sends "connected N" once per second
+# They stay off by default because the link test writes into the target's serial
+# stream (it goes out as WLINK_MSG_SERIAL) and the verbose log costs throughput.
