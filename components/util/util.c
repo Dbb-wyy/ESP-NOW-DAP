@@ -9,7 +9,7 @@
 
 void __attribute__((noreturn)) eub_abort(void)
 {
-    /* Plain abort(): serial logs are the only failure record, because no status LED is
-       driven (see CONFIG_BRIDGE_LED_ENABLE and components/util/led_rgb.c). */
+    /* Plain abort(): serial logs are the only failure record. The status LED is a separate
+       feature (see led_rgb.c) and is deliberately not used to signal an abort. */
     abort();
 }

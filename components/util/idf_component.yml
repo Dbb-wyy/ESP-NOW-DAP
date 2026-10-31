@@ -1,0 +1,8 @@
+## IDF Component Manager Manifest File
+#
+# The status LED driver is declared by the component that uses it, so main/ stays free of
+# implementation details. There is no target restriction: RMT exists on every supported
+# target, and the component is compiled out of wired images because
+# CONFIG_BRIDGE_LED_ENABLE is unavailable there (see main/Kconfig.projbuild).
+dependencies:
+  espressif/led_strip: "^3.0.0"

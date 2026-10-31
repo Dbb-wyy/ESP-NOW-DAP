@@ -10,52 +10,97 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "sdkconfig.h"
 
 /*
- * Optional addressable (WS2812) RGB status LED.
+ * Addressable (WS2812) status LED.
  *
- * The feature is switched on with CONFIG_BRIDGE_LED_ENABLE; with it disabled there is
- * no LED pin at all and every function below is a stub. When enabled, the pin is chosen
- * with CONFIG_BRIDGE_WS2812_GPIO (-1 means none). The driver is deliberately NOT
- * implemented yet: led_rgb_init() only validates the pin and records the intent, and the
- * pin is left in its reset state - it is never configured, never driven and never pulsed.
- * Boards whose pinout does not match the defaults therefore stay untouched, while the
- * future status LED has one place to land.
+ * The feature is switched on with CONFIG_BRIDGE_LED_ENABLE; with it disabled (which is
+ * always the case for the wired role, see the Kconfig dependency) there is no LED pin at
+ * all and every function below either compiles to a stub or, for the two notifying
+ * helpers, to an empty inline function. A call site therefore never needs an #if.
  *
- * Contract for the eventual driver (call sites already rely on it):
- *   - led_rgb_init() may then configure the pin and is still called once from app_main;
- *   - led_rgb_is_available() reports whether the LED can actually be driven;
- *   - led_rgb_set()/led_rgb_off() are cheap, safe from any task and never block for
- *     longer than one frame (~30 us per WS2812);
- *   - nothing here may touch the pin before led_rgb_init() has succeeded.
+ * The LED reports the state of the bridge, not the state of the USB device: while the
+ * ESP-NOW link is up it breathes cyan, while the link is down it flashes amber, and
+ * recent SWD or serial traffic temporarily takes over with blue, green or violet.
+ *
+ * Activity is pushed - a call site only stores a timestamp, which is a single 32 bit
+ * write and therefore cheap enough for the USB and Wi-Fi callbacks - while the link
+ * state is pulled through led_rgb_link_ops_t, so this module stays independent of the
+ * wireless link implementation.
+ *
+ * Contract:
+ *   - led_rgb_init() is called once from app_main; it validates the pin and, when
+ *     accepted, starts the rendering task. A rejected pin is reported, never fatal.
+ *   - led_rgb_is_available() reports whether the LED can actually be driven.
+ *   - led_rgb_notify_activity() is safe from any task and never blocks.
+ *   - led_rgb_set()/led_rgb_off() override the state machine for a short while and are
+ *     the only calls that may block, for one WS2812 frame (~30 us).
+ *   - nothing here touches the pin before led_rgb_init() has succeeded.
  */
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/*
- * @brief Validate CONFIG_BRIDGE_WS2812_GPIO without touching the pin.
+/** Events that temporarily take over the LED. Order does not matter, the renderer picks. */
+typedef enum {
+    LED_RGB_ACT_SWD = 0,    /*!< a CMSIS-DAP packet was relayed in either direction */
+    LED_RGB_ACT_SERIAL,     /*!< serial bytes were relayed in either direction */
+    LED_RGB_ACT_MAX,
+} led_rgb_activity_t;
+
+/**
+ * Link state source. Both callbacks are invoked from the LED task and must not block;
+ * @p link_up is expected to be cheap, it runs 40 times per second.
+ */
+typedef struct {
+    bool (*link_up)(void);              /*!< true while the peer is reachable */
+    uint32_t (*peer_last_seen_ms)(void);/*!< milliseconds since the last frame, 0 = never */
+} led_rgb_link_ops_t;
+
+/**
+ * @brief Validate CONFIG_BRIDGE_WS2812_GPIO, claim the pin and start rendering.
  *
- * @return ESP_OK when the pin is unassigned (-1) or accepted.
+ * @return ESP_OK when the pin is unassigned (-1) or accepted and the task is running.
  * @return ESP_ERR_INVALID_ARG when the number is outside the chip's GPIO range or
  *         already used by another bridge function (TX/RX/BOOT/RST, TCK/TMS).
+ * @return ESP_ERR_NO_MEM / the RMT error when the strip could not be created.
  */
 esp_err_t led_rgb_init(void);
 
-/*
- * @brief Whether the reserved LED can actually be driven. False until a WS2812
- *        driver exists, so callers can skip colour decisions entirely.
- */
+/** @brief Whether the LED is actually being driven. */
 bool led_rgb_is_available(void);
 
-/*
- * @brief Ask for a colour. Currently logs once and returns ESP_ERR_NOT_SUPPORTED.
+/**
+ * @brief Register the link state source. The pointer must outlive the caller's use of
+ *        the LED; every current caller passes a static const structure.
+ */
+#if CONFIG_BRIDGE_LED_ENABLE
+void led_rgb_set_link_ops(const led_rgb_link_ops_t *ops);
+#else
+static inline void led_rgb_set_link_ops(const led_rgb_link_ops_t *ops) { (void)ops; }
+#endif
+
+/**
+ * @brief Stamp one activity event. Cheap, lock free and safe from any task, including
+ *        the USB and Wi-Fi callbacks.
+ */
+#if CONFIG_BRIDGE_LED_ENABLE
+void led_rgb_notify_activity(led_rgb_activity_t act);
+#else
+static inline void led_rgb_notify_activity(led_rgb_activity_t act) { (void)act; }
+#endif
+
+/**
+ * @brief Show one colour for LED_RGB_MANUAL_HOLD_MS and then resume the state machine.
+ *
+ * @return ESP_OK, or ESP_ERR_INVALID_STATE when the LED is not available.
  */
 esp_err_t led_rgb_set(uint8_t red, uint8_t green, uint8_t blue);
 
-/*
- * @brief Turn the LED off (all channels zero). Same state rules as led_rgb_set().
+/**
+ * @brief Turn the LED off immediately and hand control back to the state machine.
  */
 esp_err_t led_rgb_off(void);
 

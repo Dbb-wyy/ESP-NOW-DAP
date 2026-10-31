@@ -136,8 +136,15 @@ menu "END-config"
             config BRIDGE_LED_ENABLE
                 bool "Enable the WS2812 status LED"
                 default n
+                depends on !BRIDGE_ROLE_WIRED
                 help
-                    Enables the (optionally wired) WS2812 status LED.
+                    Enables the addressable (WS2812) status LED, which reports the state
+                    of the bridge: breathing cyan while the ESP-NOW link is up, flashing
+                    yellow while it is down, flashing blue for SWD activity, flashing
+                    green for serial activity and flashing violet when both are busy.
+
+                    The wired role is excluded: it has no link to report, and its boards
+                    are not expected to carry such an LED.
 
                     While disabled there is no LED pin at all: the pin option below is
                     not offered, no pin is configured, driven or reset, and the LED
@@ -145,29 +152,85 @@ menu "END-config"
                     because a pin number that does not match the board cannot disturb
                     anything then.
 
-                    No driver is implemented yet: enabling this only lets led_rgb_init()
-                    validate the reserved pin. The status LED work item covers the RMT
-                    based driver.
+                    The LED is driven from the RMT peripheral through the managed
+                    component espressif/led_strip, declared in
+                    components/util/idf_component.yml.
 
             config BRIDGE_WS2812_GPIO
-                int "GPIO reserved for a WS2812 status LED (-1 = none)"
+                int "GPIO connected to the WS2812 data input (-1 = none)"
                 default -1
                 depends on BRIDGE_LED_ENABLE
                 help
-                    GPIO number reserved for an addressable RGB status LED (WS2812/WS2812B),
-                    or -1 to reserve nothing.
+                    GPIO number wired to the data input of the addressable RGB status LED
+                    (WS2812/WS2812B), or -1 to drive nothing.
 
-                    No driver is implemented yet: this option only records the intent and
-                    led_rgb_init() merely validates the pin. The pin is left in its reset
-                    state - it is never configured, driven or pulsed - so naming a pin on a
-                    board without such an LED does not disturb anything either.
+                    -1 is the default on purpose: an LED pin depends on the board, and a
+                    wrong number would drive a pin that carries something else.
 
                     led_rgb_init() rejects a pin outside the chip's GPIO range, and a pin
-                    already used by the target UART or the debug probe.
+                    already used by the target UART or the debug probe, because a status
+                    LED must never fight a functional signal.
 
-                    The eventual driver needs a peripheral that can emit 800 kHz pulse
-                    trains (RMT is the usual choice), plus a 5 V supply and level shifting
-                    on most WS2812 parts.
+                    Most WS2812 parts want a 5 V supply; with a 3.3 V GPIO data line that
+                    usually needs level shifting, and the first LED may need a supply
+                    closer to 5 V to behave.
+
+            config BRIDGE_LED_BRIGHTNESS
+                int "Overall brightness (0-255)"
+                range 0 255
+                default 64
+                depends on BRIDGE_LED_ENABLE
+                help
+                    Ceiling applied to every colour. 64 is a deliberately conservative
+                    starting point: a WS2812 at full brightness is uncomfortably bright
+                    for a status indicator and draws a lot of current.
+
+            config BRIDGE_LED_ACT_WINDOW_MS
+                int "Activity window (ms)"
+                range 50 5000
+                default 500
+                depends on BRIDGE_LED_ENABLE
+                help
+                    How long a single SWD packet or serial burst keeps its colour on
+                    screen. OpenOCD can leave gaps of a few hundred milliseconds between
+                    commands while stepping, so a window that is too short makes the LED
+                    fall back to the idle colour in the middle of a session.
+
+            config BRIDGE_LED_BLINK_PERIOD_MS
+                int "Blink period (ms)"
+                range 100 10000
+                default 500
+                depends on BRIDGE_LED_ENABLE
+                help
+                    Length of one on/off cycle for the flashing states (link down, SWD
+                    activity, serial activity, both).
+
+            config BRIDGE_LED_BLINK_ON_MS
+                int "Blink on-time (ms)"
+                range 10 10000
+                default 120
+                depends on BRIDGE_LED_ENABLE
+                help
+                    How much of each blink period the LED is lit. Must be shorter than
+                    the blink period; a longer value simply means "always on".
+
+            config BRIDGE_LED_BREATH_PERIOD_MS
+                int "Breathing period (ms)"
+                range 500 20000
+                default 2000
+                depends on BRIDGE_LED_ENABLE
+                help
+                    Length of one full fade down and back up for the idle state.
+
+            config BRIDGE_LED_BREATH_MIN_PCT
+                int "Breathing minimum brightness (%)"
+                range 0 100
+                default 6
+                depends on BRIDGE_LED_ENABLE
+                help
+                    Brightness at the darkest point of the breath, as a percentage of
+                    full scale; the global brightness is applied on top of it. 0 lets the
+                    LED go fully dark each cycle.
 
         endmenu
 
@@ -214,6 +277,20 @@ menu "END-config"
                 After the wait the request is still sent (as a broadcast, which the
                 slave receives as well), so this only trades a little latency at
                 start-up for reliability.
+
+        config WLINK_PEER_TIMEOUT_MS
+            int "Peer considered lost after (ms)"
+            range 500 60000
+            default 3000
+            help
+                A peer that has been heard from more than this long ago is reported as
+                lost, which turns the status LED yellow. Beacons arrive once per second,
+                so the default tolerates two missed beacons before declaring the link
+                down.
+
+                This only feeds the status LED. The SWD relay keeps using
+                WLINK_PEER_WAIT_MS and the response timeout above, so a link that is
+                merely slow is not torn down.
 
     endmenu
 

@@ -234,8 +234,9 @@ void app_main(void)
 {
     /* The optional status LED. With CONFIG_BRIDGE_LED_ENABLE=n this is a stub that only
        logs, so no pin is ever configured. When enabled it validates the reserved WS2812
-       pin and, for now, records it without driving anything: a rejected pin (range or
-       collision) must not keep the bridge from running. */
+       pin, claims it and starts the rendering task; the link state source is registered
+       later, by bridge_uplink_init(), once the ESP-NOW link exists. A rejected pin (range
+       or collision) must not keep the bridge from running. */
     if (led_rgb_init() != ESP_OK) {
         ESP_LOGW(TAG, "Status LED configuration rejected, continuing without it");
     }
