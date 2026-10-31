@@ -67,20 +67,37 @@ static const char *TAG = "bridge_glue";
 
 /* =================================================================== status LEDs */
 
+/* The three helpers below are the only places that touch the LED pins. They are
+   compiled to empty stubs unless CONFIG_BRIDGE_LED_ENABLE is set, so the eight call
+   sites stay identical in both configurations and no pin is ever configured on
+   boards whose LED wiring we do not know. */
+
 void bridge_led_serial_tx(bool active)
 {
+#if CONFIG_BRIDGE_LED_ENABLE
     /* TX and RX LEDs are swapped so the LEDs show traffic in the bridge -> target direction. */
     gpio_set_level(LED_RX, active ? LED_RX_ON : LED_RX_OFF);
+#else
+    (void)active;
+#endif
 }
 
 void bridge_led_serial_rx(bool active)
 {
+#if CONFIG_BRIDGE_LED_ENABLE
     gpio_set_level(LED_TX, active ? LED_TX_ON : LED_TX_OFF);
+#else
+    (void)active;
+#endif
 }
 
 void bridge_led_debug(bool active)
 {
+#if CONFIG_BRIDGE_LED_ENABLE
     gpio_set_level(LED_JTAG, active ? LED_JTAG_ON : LED_JTAG_OFF);
+#else
+    (void)active;
+#endif
 }
 
 /* ==================================================== local target side (wired/slave) */
@@ -805,7 +822,8 @@ int bridge_probe_get_proto_caps(void *dest)
 
 void bridge_probe_register_activity_callback(debug_activity_notify_cb_t callback)
 {
-    (void)callback;  /* the relay drives LED_JTAG itself */
+    (void)callback;  /* the relay drives the LED_JTAG helper itself (a stub unless
+                        CONFIG_BRIDGE_LED_ENABLE is set) */
 }
 
 void bridge_probe_handle_esp32_tdi_bootstrapping(bool rebooting)

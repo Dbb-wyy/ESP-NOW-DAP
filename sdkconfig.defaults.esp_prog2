@@ -14,9 +14,15 @@ CONFIG_DEBUG_PROBE_GPIO_TDO=6
 CONFIG_DEBUG_PROBE_GPIO_TCK=5
 CONFIG_DEBUG_PROBE_GPIO_TMS=4
 
-CONFIG_BRIDGE_GPIO_LED1=48
-CONFIG_BRIDGE_GPIO_LED2=34
-CONFIG_BRIDGE_GPIO_LED3=34
-CONFIG_BRIDGE_GPIO_LED1_ACTIVE=0
-CONFIG_BRIDGE_GPIO_LED2_ACTIVE=0
-CONFIG_BRIDGE_GPIO_LED3_ACTIVE=0
+# Status LEDs: unverified candidates only, left commented out on purpose.
+# CONFIG_BRIDGE_LED_ENABLE is off by default, so nothing is driven. The values below
+# were never confirmed against a schematic (Espressif does not publish the ESP-Prog-2
+# schematic): LED2 and LED3 both pointing at GPIO 34 is self-contradictory, and GPIO 48
+# on an ESP32-S3 board is usually a WS2812, which a plain gpio_set_level() cannot drive.
+# Enable CONFIG_BRIDGE_LED_ENABLE and uncomment only after checking the real wiring.
+# CONFIG_BRIDGE_GPIO_LED1=48
+# CONFIG_BRIDGE_GPIO_LED2=34
+# CONFIG_BRIDGE_GPIO_LED3=34
+# CONFIG_BRIDGE_GPIO_LED1_ACTIVE=0
+# CONFIG_BRIDGE_GPIO_LED2_ACTIVE=0
+# CONFIG_BRIDGE_GPIO_LED3_ACTIVE=0

@@ -31,11 +31,9 @@ CONFIG_SERIAL_HANDLER_GPIO_TXD=7
 # it when the board changes: GPIO 8/9/15 are strapping pins on the C6, so a
 # different carrier board may sample different levels at reset.
 
-# Status LEDs on 18/19/20: GPIO 12/13 are the USB Serial/JTAG pins on this chip and
-# are left free for that purpose.
-CONFIG_BRIDGE_GPIO_LED1=18
-CONFIG_BRIDGE_GPIO_LED2=19
-CONFIG_BRIDGE_GPIO_LED3=20
+# No status LED pins here: CONFIG_BRIDGE_LED_ENABLE is off by default and the pins on
+# this verified board are not connected to LEDs anyway. Enable it in menuconfig and
+# set the pins once the LED wiring of a board is known.
 
 # Debug aids, deliberately off in the defaults (enable per build in menuconfig,
 # "Wireless Link Configuration"):

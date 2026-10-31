@@ -58,44 +58,87 @@ menu "Bridge Configuration"
         help
             Product name string shown in USB device descriptor
 
+    config BRIDGE_LED_ENABLE
+        bool "Drive the status LEDs (LED1..3)"
+        default n
+        help
+            Drives the three discrete activity LEDs on BRIDGE_GPIO_LED1..3.
+
+            Leave this disabled unless the board really has LEDs wired to those pins
+            with the configured polarity. While disabled the pins are never
+            configured, driven or reset, so they stay in their power-on state and
+            cannot disturb whatever the board actually connects there.
+
+            The pin and polarity options below are kept in both configurations
+            because the LED code compiles against them either way; they are inert
+            while this option is off.
+
+            This option does not cover an addressable RGB LED; see
+            BRIDGE_WS2812_GPIO.
+
     config BRIDGE_GPIO_LED1
         int "GPIO pin LED1"
         default 12
         help
-            GPIO pin for LED1 (typically TX activity indicator)
+            GPIO pin for LED1 (typically TX activity indicator). Only used when
+            BRIDGE_LED_ENABLE is set.
 
     config BRIDGE_GPIO_LED2
         int "GPIO pin LED2"
         default 13
         help
-            GPIO pin for LED2 (typically RX activity indicator)
+            GPIO pin for LED2 (typically RX activity indicator). Only used when
+            BRIDGE_LED_ENABLE is set.
 
     config BRIDGE_GPIO_LED3
         int "GPIO pin LED3"
         default 14
         help
-            GPIO pin for LED3 (typically debug activity indicator)
+            GPIO pin for LED3 (typically debug activity indicator). Only used when
+            BRIDGE_LED_ENABLE is set.
 
     config BRIDGE_GPIO_LED1_ACTIVE
         int "GPIO pin LED1 active value"
         range 0 1
         default 0
         help
-            Logic level when LED1 is active (0=active low, 1=active high)
+            Logic level when LED1 is active (0=active low, 1=active high). Only used
+            when BRIDGE_LED_ENABLE is set.
 
     config BRIDGE_GPIO_LED2_ACTIVE
         int "GPIO pin LED2 active value"
         range 0 1
         default 0
         help
-            Logic level when LED2 is active (0=active low, 1=active high)
+            Logic level when LED2 is active (0=active low, 1=active high). Only used
+            when BRIDGE_LED_ENABLE is set.
 
     config BRIDGE_GPIO_LED3_ACTIVE
         int "GPIO pin LED3 active value"
         range 0 1
         default 0
         help
-            Logic level when LED3 is active (0=active low, 1=active high)
+            Logic level when LED3 is active (0=active low, 1=active high). Only used
+            when BRIDGE_LED_ENABLE is set.
+
+    config BRIDGE_WS2812_GPIO
+        int "GPIO reserved for a WS2812 status LED (-1 = none)"
+        default -1
+        help
+            GPIO number reserved for an addressable RGB status LED (WS2812/WS2812B),
+            or -1 to reserve nothing.
+
+            No driver is implemented yet: this option only records the intent and
+            led_rgb_init() merely validates the pin. The pin is left in its reset
+            state - it is never configured, driven or pulsed - so naming a pin on a
+            board without such an LED does not disturb anything either.
+
+            led_rgb_init() rejects a pin outside the chip's GPIO range, and a pin
+            already used by the target UART, the debug probe or the activity LEDs.
+
+            The eventual driver needs a peripheral that can emit 800 kHz pulse
+            trains (RMT is the usual choice), plus a 5 V supply and level shifting
+            on most WS2812 parts.
 
     config BRIDGE_MSC_VOLUME_LABEL
         string "Volume label shown in the MSC disc"

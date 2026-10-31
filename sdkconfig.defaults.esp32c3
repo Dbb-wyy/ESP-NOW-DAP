@@ -26,8 +26,11 @@ CONFIG_SERIAL_HANDLER_GPIO_RST=7
 CONFIG_SERIAL_HANDLER_GPIO_RXD=5
 CONFIG_SERIAL_HANDLER_GPIO_TXD=4
 
-# Status LEDs on 12/13/14: GPIO 2/8/9 are strapping pins and GPIO 18/19 are the
-# USB D-/D+ pins on this chip, so the LEDs stay clear of both.
-CONFIG_BRIDGE_GPIO_LED1=12
-CONFIG_BRIDGE_GPIO_LED2=13
-CONFIG_BRIDGE_GPIO_LED3=14
+# No status LED pins here: CONFIG_BRIDGE_LED_ENABLE is off by default, so no LED pin
+# is ever configured. This matters especially on this chip, where GPIO 12-17 belong
+# to the in-package SPI flash and GPIO 11 is VDD_SPI: driving them would break the
+# flash and the SWD pins, and a wrong pin here only shows up at run time, never at
+# build time. Pick the LEDs and the probe/UART pins together once the C3 board is in
+# hand (stage 4).
+# The TMS=11 above is the same kind of problem (GPIO 11 is VDD_SPI) and is also left
+# for stage 4, where the whole pin map gets re-checked against the real board.

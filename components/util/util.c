@@ -14,6 +14,10 @@
 
 void __attribute__((noreturn)) eub_abort(void)
 {
+#if CONFIG_BRIDGE_LED_ENABLE
+    /* The failure pattern is only an aid. It needs the LEDs to be configured, which
+       only happens when BRIDGE_LED_ENABLE is set; otherwise the pins are never
+       touched and the pattern is skipped. Serial logs are the primary record. */
     const int led_patterns[][3] = {
         {LED_TX_ON,  LED_RX_ON,  LED_JTAG_ON},
         {LED_TX_ON,  LED_RX_OFF, LED_JTAG_ON},
@@ -30,6 +34,7 @@ void __attribute__((noreturn)) eub_abort(void)
         gpio_set_level(LED_JTAG, led_patterns[i][2]);
         vTaskDelay(pdMS_TO_TICKS(500));
     }
+#endif
 
     abort();
 }
