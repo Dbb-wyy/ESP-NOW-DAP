@@ -89,13 +89,81 @@ typedef struct __attribute__((packed)) {
   consecutive frames, so a 2 KB UART burst from the target arrives intact.
 * **Channel** — fixed at start-up (`CONFIG_WLINK_CHANNEL`, default 1) instead of
   following the station configuration, so the pair works without an access point.
-  **Both boards must use the same channel.**
+  **Both boards must use the same channel**; see §4 for why, how to choose one, and
+  what happens when two pairs share a channel.
 * Native ESP-IDF `esp_now.h` is used directly; there is no dependency on the
   `espressif/esp-now` component.
 
 ---
 
-## 4. SWD relay: ordering and duplicates
+## 4. Channels: what they are and how to pick one
+
+ESP-NOW borrows the 2.4 GHz Wi-Fi physical layer but performs no association, so there
+is no access point to follow and the channel is a build-time setting of the firmware.
+
+**What a channel is.** The 2.4 GHz ISM band (2400–2483.5 MHz) is sliced into chunks
+about 20 MHz wide. Channel *n* is centred at `2412 + 5 * (n - 1)` MHz: channel 1 at
+2412 MHz, 6 at 2437 MHz, 11 at 2462 MHz. The spacing is only 5 MHz while each channel
+is 20 MHz wide, so neighbours overlap heavily; only channels five apart (25 MHz) are
+genuinely separate. That is why 1/6/11 are the classic non-overlapping picks, and why
+`CONFIG_WLINK_CHANNEL` stops at 1–13 (the union of what most regions allow; channel 14
+is Japan-only and 802.11b-only).
+
+**Same channel means shared air.** Every device on a channel — access points, phones,
+Bluetooth, a microwave oven — competes for the same spectrum under CSMA/CA, so a busy
+channel means more collisions, more retransmissions and higher latency. On this link
+that shows up as `CONFIG_WLINK_SWD_TIMEOUT_MS` expiries, then as OpenOCD timeouts,
+which is one more reason to keep `adapter speed` low.
+
+**A different channel means physically unheard.** A receiver listens on one frequency;
+a transmitter on another is not filtered out, it is simply not received. An ESP-NOW
+frame carries no channel field, and the link does not ask "which network is this", so:
+
+1. Both boards of a pair must use the same channel. `wireless_link.c` calls
+   `esp_wifi_set_channel(CONFIG_WLINK_CHANNEL, WIFI_SECOND_CHAN_NONE)` and registers the
+   peer with the same number (`.channel`), i.e. a strict 20 MHz narrowband with no 40 MHz
+   secondary channel.
+2. The channel is the **only** isolation this protocol has. Same channel = same air =
+   one conversation. Two pairs on one channel hear each other: the receive filter only
+   rejects frames whose `role` equals the local role, and after pairing it does not
+   filter by MAC, so a slave can learn — and answer — the wrong host. Separation is by
+   frequency, not by name, and it is not encryption either (§9).
+
+**How to set it.** `CONFIG_WLINK_CHANNEL` is in
+`END-config -> Wireless link -> Wi-Fi channel used by the bridge link`
+(`main/Kconfig.projbuild`, `range 1 13`, `default 1`), and
+`sdkconfig.defaults.wireless_host` / `.wireless_slave` currently pin it to 1. An
+existing `sdkconfig` (or the file named by `-D SDKCONFIG`) wins over any defaults file,
+so either edit that file or run `menuconfig`. For a reproducible second pair, put
+`CONFIG_WLINK_CHANNEL=6` in a tiny extra defaults file and append it **last** in
+`SDKCONFIG_DEFAULTS`, for example:
+
+```
+idf.py -B build_b_host -D SDKCONFIG=sdkconfig.b_host \
+      -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.wireless_host;sdkconfig.pair_b.defaults" \
+      set-target esp32s3
+```
+
+Mind the board presets: the C6/C3 slaves do **not** use `sdkconfig.defaults.wireless_slave`
+(it carries CPU1 symbols that do not exist on a single-core chip), so for them the channel
+comes either from their own `sdkconfig.defaults.esp32c3` / `.esp32c6` or from an extra file
+like the one above.
+
+**Practical rules**
+
+1. One pair = one channel number, identical on both boards.
+2. Two pairs in the same room = two different channels, ideally chosen from {1, 6, 11}.
+3. Verify in the log: `Link up as HOST, mac ..., channel 6`. A mismatch never pairs —
+   `Peer discovered` never appears and the host repeats
+   `Link is not paired yet, waiting up to 2000 ms`.
+4. To choose: scan with a phone Wi-Fi app and take the quietest of 1/6/11; in an empty
+   room the choice is arbitrary.
+5. The channel does not change range or PHY rate. ESP-NOW transmits at 1 Mbps by default
+   to favour range; the channel only decides how much interference shares the air.
+
+---
+
+## 5. SWD relay: ordering and duplicates
 
 CMSIS-DAP is request/response, and ESP-NOW can drop or duplicate frames, so the
 relay adds a small amount of protocol on top of the link.
@@ -145,7 +213,7 @@ relay adds a small amount of protocol on top of the link.
 
 ---
 
-## 5. Serial relay
+## 6. Serial relay
 
 * **Host**: `tud_cdc_rx_cb` forwards to the link; the link receive handler pushes
   into the existing USB sender ring buffer, so the CDC IN path is unchanged from
@@ -163,12 +231,12 @@ link: baud rate changes and the reset dance are tunneled transparently.
 
 ---
 
-## 6. Configuration
+## 7. Configuration
 
 | Symbol | Where | Notes |
 |---|---|---|
 | `CONFIG_BRIDGE_ROLE_*` | `main/Kconfig.projbuild` | role of this image |
-| `CONFIG_WLINK_CHANNEL` | `main/Kconfig.projbuild` | must match on both boards |
+| `CONFIG_WLINK_CHANNEL` | `main/Kconfig.projbuild` | 1–13, default 1; must match on both boards, and two pairs need two different channels (§4) |
 | `CONFIG_WLINK_PEER_WAIT_MS` | ditto | how long the host waits for pairing before sending anyway |
 | `CONFIG_WLINK_SWD_TIMEOUT_MS` | ditto | per-attempt DAP response timeout |
 | `CONFIG_WLINK_SWD_RETRIES` | ditto | request retransmissions before giving up |
@@ -182,13 +250,19 @@ link: baud rate changes and the reset dance are tunneled transparently.
 | `CONFIG_SERIAL_HANDLER_GPIO_*` | `sdkconfig.defaults.esp32s3` | target UART + BOOT/RST |
 
 Board settings live in `sdkconfig.defaults.esp32s3`, so all three role builds and
-a plain `idf.py build` use the same pins, flash size and USB identity. ESP32-C6 has its own
-file, `sdkconfig.defaults.esp32c6`, which keeps the target UART on BOOT=10 / RST=9 (its BOOT
-pin moved off GPIO8, the devkit's WS2812). Only these two targets carry a board preset.
+a plain `idf.py build` use the same pins, flash size and USB identity. The two other
+supported slave targets carry their own preset:
+
+* `sdkconfig.defaults.esp32c6` — SWCLK=4, SWDIO=5, TXD=7, RXD=6, BOOT=10, RST=9 (BOOT moved
+  off GPIO8, which the devkit uses for its WS2812).
+* `sdkconfig.defaults.esp32c3` — SWCLK=4, SWDIO=3, TXD=1, RXD=2, BOOT=6, RST=7, status LED
+  disabled. That map exists because the chip gives away GPIO11 (VDD_SPI), GPIO12–17
+  (in-package flash) and GPIO18/19 (USB). The console stays on UART0, which IDF also mirrors
+  to the chip's own USB Serial/JTAG port, so either port shows the log.
 
 ---
 
-## 7. Usage
+## 8. Usage
 
 1. Flash the **host** image to the board connected to the PC, the **slave** image
    to the board connected to the target.
@@ -206,7 +280,7 @@ pin moved off GPIO8, the devkit's WS2812). Only these two targets carry a board 
 
 ---
 
-## 8. Limitations
+## 9. Limitations
 
 * The wireless roles have **no mass storage / UF2 interface**, because the host has
   no local UART to flash through. Flash the target with `esptool` over the
