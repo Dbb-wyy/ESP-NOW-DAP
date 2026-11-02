@@ -31,7 +31,7 @@ ESP-NOW-DAP 通过 USB 线连接时，会向 PC 呈现一个 USB 复合设备，
 
 ### 编译无线角色
 
-`END-config -> Role configuration -> Firmware role` 决定这份固件实现桥的哪一端。默认是 wired 角色，所以直接 `idf.py build` 得到的仍是原来的单板固件。
+`END-config -> Role configuration -> Firmware role` 决定这份固件实现桥的哪一端。ESP32-S3 上默认是**无线主机**，所以直接 `idf.py build` 得到的是 PC 那一侧的固件；单板有线模式要显式选 wired（`sdkconfig.defaults.wired` 已经备好预设）。
 
 **一次只编一个角色** —— 在 menuconfig 里选好角色后正常编译：
 
@@ -44,9 +44,11 @@ idf.py build
 **同时保留多个角色** —— 给每个角色独立的 sdkconfig 与构建目录，切换角色不会互相影响：
 
 ```bash
-# wired
-idf.py -B build_wired -D SDKCONFIG=sdkconfig.wired set-target esp32s3
-idf.py -B build_wired -D SDKCONFIG=sdkconfig.wired build
+# wired（单板有线模式，需要显式指定）
+idf.py -B build_wired -D SDKCONFIG=sdkconfig.wired \
+       -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.wired" set-target esp32s3
+idf.py -B build_wired -D SDKCONFIG=sdkconfig.wired \
+       -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.wired" build
 
 # 无线主机：放在 PC 旁边
 idf.py -B build_host -D SDKCONFIG=sdkconfig.host \
@@ -150,26 +152,40 @@ idf.py -p /dev/ttyACMx monitor
 | --- | --- | --- |
 | ESP-NOW 未连接 | 黄 255,180,0 | 闪 |
 | SWD 与串口同时在用 | 紫 140,0,255 | 闪 |
-| 只用 SWD | 蓝 0,80,255 | 闪 |
-| 只用串口 | 绿 0,255,60 | 闪 |
+| SWD 调试会话中 | 蓝 0,80,255 | 闪 |
+| 串口有流量 | 绿 0,255,60 | 闪 |
 | 已连接、空闲 | 青 0,180,180 | 呼吸 |
 
 优先级从上往下：断开时的黄色压过一切，“两路都在用”压过单路。所以上电后还没配对时看到的是黄闪，
 配对成功、两路都安静下来之后转成青呼吸。
 
-默认不启用，启用步骤如下：
+蓝色看的是**调试会话**而不是某一条命令：CMSIS-DAP 的 Connect 命令打开它，Disconnect 命令关闭它。
+这样 target 停住时调试器可以几分钟不发一个包（你正在看代码），蓝灯照样亮着；退出调试器则立刻回落。
+串口没有会话概念，仍然是“最近有字节流过”。默认不设超时，只有 Disconnect 能结束蓝色会话；若你的
+调试器被强杀（来不及发 Disconnect），可以在同一菜单里给 SWD session timeout 填一个毫秒数做兜底，
+代价是真正空闲的会话也会在那么久之后结束。
+
+板级默认值里已经配好：ESP32-S3 用 GPIO48、ESP32-C6 用 GPIO8（都是 devkit 板载的那颗 RGB 灯），
+亮度 16；其他板子不启用（引脚保持 -1）。要改就在：
 
 ```
 idf.py menuconfig
 END-config -> Pin configuration -> Status LED
   [*] Enable the WS2812 status LED
-  (-1) GPIO connected to the WS2812 data input (-1 = none)   <- 填实际引脚
+  (48) GPIO connected to the WS2812 data input (-1 = none)
 ```
 
-引脚留 `-1` 等于关灯，这是默认值：LED 引脚因板而异，填错的数字会去驱动别的功能脚。
+引脚填 `-1` 等于关灯：LED 引脚因板而异，填错的数字会去驱动别的功能脚。
 填成已经分配给 UART、BOOT/RST 或 SWD 的引脚会被 `led_rgb_init()` 拒绝并打日志，桥本身照常工作。
-其余观感参数（整体亮度、活动保持时间、闪烁周期与亮占比、呼吸周期与最暗百分比）都在同一个菜单里，
-可按实际板子调；链路判定超时在 `END-config -> Wireless link -> Peer timeout`。
+其余观感参数（整体亮度、活动保持时间、闪烁周期与亮占比、呼吸周期与最暗百分比、呼吸 gamma）都在
+同一个菜单里，可按实际板子调；链路判定超时在 `END-config -> Wireless link -> Peer timeout`。
+呼吸曲线默认 gamma 2.2（`Breathing gamma (x100)` = 220），作用是把线性三角波换成视觉上等速的亮度变化；
+不想要就填 100 回到线性，觉得低端太暗就调到 150 左右。
+亮度决定可用级数：青在 brightness 64 时整个呼吸只有 0..45 共 46 个码，直接四舍五入会出现肉眼可见的台阶，
+所以渲染器做逐帧抖动，把台阶摊成占空比。但抖动本身在级数太少时会变成几赫兹的闪烁（brightness 8 时
+一个码就是峰值的 17%），所以峰值不足 16 个码时会自动退回四舍五入（默认的 brightness 16 属于这一档，
+呼吸是 11 级微台阶、不闪烁）。也就是说极低亮度下“台阶”和“闪烁”只能二选一——想两样都没有，
+请把 `Overall brightness` 提到 32 以上（1 个码 ≤ 4%）。
 驱动使用托管组件 `espressif/led_strip`（RMT 后端），由组件管理器自动拉取。
 
 wired 角色不支持状态灯：该选项被 `depends on !BRIDGE_ROLE_WIRED` 关掉，打开它只有无线两个角色可用。
@@ -237,8 +253,9 @@ a plain `idf.py build` and every wireless role build start from the same hardwar
 ### Building the wireless roles
 
 `END-config -> Role configuration -> Firmware role` selects which end of the bridge the firmware
-implements. The wired role is the default, so a plain `idf.py build` still produces
-the original single-board firmware.
+implements. On the ESP32-S3 the default is the **wireless host**, so a plain `idf.py build`
+produces the PC-side firmware; the single-board wired mode has to be selected explicitly
+(`sdkconfig.defaults.wired` is the ready-made preset).
 
 **One role at a time** — pick the role in menuconfig and build normally:
 
@@ -252,9 +269,11 @@ idf.py build
 directory, so switching roles never touches the other builds:
 
 ```bash
-# wired
-idf.py -B build_wired -D SDKCONFIG=sdkconfig.wired set-target esp32s3
-idf.py -B build_wired -D SDKCONFIG=sdkconfig.wired build
+# wired (single board, selected explicitly)
+idf.py -B build_wired -D SDKCONFIG=sdkconfig.wired \
+       -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.wired" set-target esp32s3
+idf.py -B build_wired -D SDKCONFIG=sdkconfig.wired \
+       -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.wired" build
 
 # wireless host: sits next to the PC
 idf.py -B build_host -D SDKCONFIG=sdkconfig.host \
@@ -383,29 +402,48 @@ host and the slave use exactly the same rules:
 | --- | --- | --- |
 | ESP-NOW link down | yellow 255,180,0 | flashing |
 | SWD and serial both in use | violet 140,0,255 | flashing |
-| SWD only | blue 0,80,255 | flashing |
-| serial only | green 0,255,60 | flashing |
+| SWD debug session open | blue 0,80,255 | flashing |
+| serial traffic | green 0,255,60 | flashing |
 | link up, idle | cyan 0,180,180 | breathing |
 
 The table is also the priority order: "down" outranks everything and "both busy" outranks a
 single stream. So right after power-up, before the pair exists, the LED flashes yellow; once
 the peer is found and the link falls quiet it settles into the cyan breathing.
 
-Disabled by default:
+Blue is a **debug session**, not one command: the CMSIS-DAP Connect command opens it and
+Disconnect closes it, so a debugger sitting on a halted target can send nothing for minutes
+while the LED stays blue, and quitting the debugger drops the colour immediately. Serial has no
+session concept and stays “bytes seen recently”. No timeout is set by default: only Disconnect
+ends a blue session. If your debugger gets killed before it can send Disconnect, set a
+millisecond value in `SWD session timeout` in the same menu as a safety net — at the cost of
+ending a genuinely idle session after that much silence.
+
+The board defaults already configure it: GPIO48 on the ESP32-S3 and GPIO8 on the ESP32-C6
+(the RGB LED each devkit carries) at brightness 16; every other board leaves it off with the
+pin at -1. To change it:
 
 ```
 idf.py menuconfig
 END-config -> Pin configuration -> Status LED
   [*] Enable the WS2812 status LED
-  (-1) GPIO connected to the WS2812 data input (-1 = none)   <- set the real pin
+  (48) GPIO connected to the WS2812 data input (-1 = none)
 ```
 
-Leaving the pin at `-1` drives nothing, which is the default on purpose: the LED pin is a
-per-board choice and a wrong number would drive a pin that carries something else. A pin that
+Leaving the pin at `-1` drives nothing: the LED pin is a per-board choice and a wrong number
+would drive a pin that carries something else. A pin that
 is already used by the UART, BOOT/RST or SWD is rejected by `led_rgb_init()` with a log line,
-and the bridge keeps running. Brightness, the activity window, the blink period and duty, and
-the breathing period and floor are all in the same menu; the link timeout lives in
-`END-config -> Wireless link -> Peer timeout`. The driver is the managed component
+and the bridge keeps running. Brightness, the activity window, the blink period and duty, the
+breathing period and floor, and the breathing gamma are all in the same menu; the link timeout
+lives in `END-config -> Wireless link -> Peer timeout`. The breathing curve defaults to gamma 2.2
+(`Breathing gamma (x100)` = 220), which turns the linear triangle into an even-looking brightness
+ramp; 100 gives the old linear one back, and 150 or so is a gentler compromise. Brightness sets
+how many codes the breath can use: cyan spans 0..45 at brightness 64, so plain rounding would show
+visible steps, and the renderer dithers them into a duty cycle frame by frame. Dithering has its
+own artefact when the codes run out - at brightness 8 one code is 17% of the peak and the pulses
+become a few-hertz flicker - so it falls back to rounding below a peak of 16 codes (the shipped
+brightness of 16 lands in that band: 11 levels, small steps, no flicker). At such a low brightness
+“steps” and “flicker” are the only two choices; for neither, set `Overall brightness` to 32 or
+more (one code is then at most 4%). The driver is the managed component
 `espressif/led_strip` (RMT backend), fetched by the component manager.
 
 The wired role has no status LED: the option is behind `depends on !BRIDGE_ROLE_WIRED`, so it

@@ -156,6 +156,27 @@ static void bridge_on_uart_data(const uint8_t *data, size_t len)
 
 #if !CONFIG_BRIDGE_ROLE_WIRED
 
+/*
+ * The CMSIS-DAP bulk backend carries no report ID, so the command is always the
+ * first payload byte. Watching it gives the status LED a session edge to latch
+ * on instead of raw traffic: a debugger sitting on a halted target sends
+ * nothing at all for minutes and the blue state still has to stay on.
+ */
+#define BRIDGE_DAP_ID_CONNECT    0x02u
+#define BRIDGE_DAP_ID_DISCONNECT 0x03u
+
+static void bridge_dap_track_session(const uint8_t *data, size_t len) {
+    if (len == 0) {
+        return;
+    }
+
+    if (data[0] == BRIDGE_DAP_ID_CONNECT) {
+        led_rgb_notify_swd_session(true);
+    } else if (data[0] == BRIDGE_DAP_ID_DISCONNECT) {
+        led_rgb_notify_swd_session(false);
+    }
+}
+
 /* ------------------------------------------------------------------- slave side */
 
 #if CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE
@@ -244,6 +265,8 @@ static void bridge_slave_swd_rx(const wlink_hdr_t *hdr, const uint8_t *payload, 
                  hdr->seq, (unsigned)len);
         return;
     }
+
+    bridge_dap_track_session(payload, len);
 
     /* Copy the cached answer under the lock the sender uses, so a response that lands
        meanwhile cannot tear the sequence number away from its payload. */
@@ -754,6 +777,8 @@ esp_err_t bridge_probe_process_data(const uint8_t *data, size_t len)
     if (!s_host_probe_started) {
         return ESP_ERR_INVALID_STATE;
     }
+
+    bridge_dap_track_session(data, len);
 
     bridge_host_swd_req_t req = { .len = (uint8_t)len };
     memcpy(req.data, data, len);

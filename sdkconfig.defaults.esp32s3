@@ -24,10 +24,19 @@ CONFIG_SERIAL_HANDLER_GPIO_RST=7
 CONFIG_SERIAL_HANDLER_GPIO_RXD=6
 CONFIG_SERIAL_HANDLER_GPIO_TXD=5
 
-# No status LED is enabled here: CONFIG_BRIDGE_LED_ENABLE defaults to off, so no LED pin
-# is configured and the module's own pinout is left alone. Enable it in menuconfig
-# ("END-config -> Pin configuration -> Status LED") once the LED wiring of a board is known.
-#
+# Status LED: WS2812 data input on GPIO48, the addressable RGB LED of the devkit.
+# Set CONFIG_BRIDGE_WS2812_GPIO to -1 (or turn CONFIG_BRIDGE_LED_ENABLE off, menu
+# "END-config -> Pin configuration -> Status LED") on a board without one.
+CONFIG_BRIDGE_LED_ENABLE=y
+CONFIG_BRIDGE_WS2812_GPIO=48
+CONFIG_BRIDGE_LED_BRIGHTNESS=16
+CONFIG_BRIDGE_LED_ACT_WINDOW_MS=1000
+CONFIG_BRIDGE_LED_BLINK_PERIOD_MS=1000
+CONFIG_BRIDGE_LED_BLINK_ON_MS=500
+CONFIG_BRIDGE_LED_BREATH_PERIOD_MS=1000
+CONFIG_BRIDGE_LED_BREATH_MIN_PCT=0
+CONFIG_BRIDGE_LED_GAMMA_X100=220
+
 # USB identity.
 CONFIG_BRIDGE_USB_VID=0x303A
 CONFIG_BRIDGE_USB_PID=0x1002

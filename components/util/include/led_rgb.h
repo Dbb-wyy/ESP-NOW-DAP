@@ -22,7 +22,18 @@
  *
  * The LED reports the state of the bridge, not the state of the USB device: while the
  * ESP-NOW link is up it breathes cyan, while the link is down it flashes amber, and
- * recent SWD or serial traffic temporarily takes over with blue, green or violet.
+ * recent SWD or serial traffic takes over with blue, green or violet.
+ *
+ * The blue "SWD in use" state is a session, not traffic: it is opened by the CMSIS-DAP
+ * Connect command and closed by Disconnect, so a debugger sitting on a halted target -
+ * which sends nothing at all for as long as the user thinks - keeps its colour. Serial
+ * activity stays packet based, there is no session to latch on to.
+ *
+ * The renderer is a small state machine with one way in: the status is sampled every
+ * half activity window, the sample is handed to a single dispatch function, and each
+ * state has its own one line function that only picks a colour and a movement. Drawing
+ * runs on a faster tick, so the sampling period shapes when the state changes but never
+ * the animation. One state per line, one place to recolour it.
  *
  * Activity is pushed - a call site only stores a timestamp, which is a single 32 bit
  * write and therefore cheap enough for the USB and Wi-Fi callbacks - while the link
@@ -52,7 +63,8 @@ typedef enum {
 
 /**
  * Link state source. Both callbacks are invoked from the LED task and must not block;
- * @p link_up is expected to be cheap, it runs 40 times per second.
+ * @p link_up is expected to be cheap, it runs once per state poll, that is every
+ * CONFIG_BRIDGE_LED_ACT_WINDOW_MS / 2 milliseconds.
  */
 typedef struct {
     bool (*link_up)(void);              /*!< true while the peer is reachable */
@@ -90,6 +102,20 @@ static inline void led_rgb_set_link_ops(const led_rgb_link_ops_t *ops) { (void)o
 void led_rgb_notify_activity(led_rgb_activity_t act);
 #else
 static inline void led_rgb_notify_activity(led_rgb_activity_t act) { (void)act; }
+#endif
+
+/**
+ * @brief Open or close the SWD session that keeps the blue state latched.
+ *
+ * Call with true on a CMSIS-DAP Connect command and false on Disconnect. Opening the
+ * session is cheap and lock free like the activity helpers. CONFIG_BRIDGE_LED_SESSION_TIMEOUT_MS
+ * defaults to 0, which means only Disconnect closes the session; a non-zero value is a safety
+ * net for a debugger that dies without sending one, refreshed by packets inside the session.
+ */
+#if CONFIG_BRIDGE_LED_ENABLE
+void led_rgb_notify_swd_session(bool active);
+#else
+static inline void led_rgb_notify_swd_session(bool active) { (void)active; }
 #endif
 
 /**

@@ -1,5 +1,10 @@
 # Wireless host: sits next to the PC, tunnels USB CDC + CMSIS-DAP over ESP-NOW.
 # Board pins / flash come from sdkconfig.defaults.esp32s3.
+#
+# This is also the Kconfig default role on chips with a USB OTG controller, so the file
+# mainly pins CONFIG_BRIDGE_ROLE_WIRELESS_HOST explicitly: a build that points
+# SDKCONFIG at a different file keeps working no matter what the default is.
+#
 # Build with:
 #   idf.py -B build_host -D SDKCONFIG=sdkconfig.host \
 #          -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.wireless_host" build

@@ -20,20 +20,31 @@ CONFIG_DEBUG_PROBE_GPIO_TMS=5
 # TDI/TDO are JTAG-only signals and are not driven in SWD mode, so they keep the
 # component defaults (3/9).
 
-# Target UART and reset lines.
-CONFIG_SERIAL_HANDLER_GPIO_BOOT=8
+# Target UART and reset lines. BOOT sits on GPIO10, not GPIO8: GPIO8 is the
+# addressable RGB LED of the devkit and is used by the status LED below.
+CONFIG_SERIAL_HANDLER_GPIO_BOOT=10
 CONFIG_SERIAL_HANDLER_GPIO_RST=9
 CONFIG_SERIAL_HANDLER_GPIO_RXD=6
 CONFIG_SERIAL_HANDLER_GPIO_TXD=7
 
 # Pin map above is the one that was verified on the actual C6 slave board during
-# stage 3 (SWCLK=4, SWDIO=5, target TXD=7, target RXD=6, BOOT=8, RST=9). Re-check
-# it when the board changes: GPIO 8/9/15 are strapping pins on the C6, so a
-# different carrier board may sample different levels at reset.
+# stage 3 (SWCLK=4, SWDIO=5, target TXD=7, target RXD=6, RST=9); BOOT moved from
+# GPIO8 to GPIO10 when the status LED took GPIO8. Re-check it when the board
+# changes: GPIO 8/9/15 are strapping pins on the C6, so a different carrier board
+# may sample different levels at reset.
 
-# No status LED is enabled here: CONFIG_BRIDGE_LED_ENABLE is off by default and this
-# verified board has no LED wired anyway. Enable it in menuconfig
-# ("END-config -> Pin configuration -> Status LED") and set the pin once the wiring is known.
+# Status LED: WS2812 data input on GPIO8, the addressable RGB LED of the devkit.
+# Set CONFIG_BRIDGE_WS2812_GPIO to -1 (or turn CONFIG_BRIDGE_LED_ENABLE off, menu
+# "END-config -> Pin configuration -> Status LED") on a board without one.
+CONFIG_BRIDGE_LED_ENABLE=y
+CONFIG_BRIDGE_WS2812_GPIO=8
+CONFIG_BRIDGE_LED_BRIGHTNESS=16
+CONFIG_BRIDGE_LED_ACT_WINDOW_MS=1000
+CONFIG_BRIDGE_LED_BLINK_PERIOD_MS=1000
+CONFIG_BRIDGE_LED_BLINK_ON_MS=500
+CONFIG_BRIDGE_LED_BREATH_PERIOD_MS=1000
+CONFIG_BRIDGE_LED_BREATH_MIN_PCT=0
+CONFIG_BRIDGE_LED_GAMMA_X100=220
 
 # Debug aids, deliberately off in the defaults (enable per build in menuconfig,
 # "END-config -> Debug"; channel and timeouts live in "END-config -> Wireless link"):

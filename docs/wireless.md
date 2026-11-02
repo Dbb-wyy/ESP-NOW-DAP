@@ -23,6 +23,10 @@ flashed on each of the two boards**.
 Both wireless roles require `END-config -> Role configuration -> Debug interface -> CMSIS-DAP SWD`.
 The build fails with an explicit `#error` in `main/bridge_glue.c` otherwise.
 
+On the ESP32-S3 the default role is the wireless host, so a plain `idf.py build` produces
+the PC-side image; build the wired one with `sdkconfig.defaults.wired`, and the slave with
+`sdkconfig.defaults.wireless_slave` (the C6/C3 default is the slave, they have no USB OTG).
+
 ---
 
 ## 2. Data paths
@@ -172,11 +176,15 @@ link: baud rate changes and the reset dance are tunneled transparently.
 | `CONFIG_WLINK_PEER_TIMEOUT_MS` | ditto | silence after which the link counts as down (status LED only) |
 | `CONFIG_WLINK_DEBUG_LINK_TEST` | ditto | debug only: slave sends `connected N` every second |
 | `CONFIG_BRIDGE_LED_ENABLE` | ditto | optional WS2812 status LED, see the README |
+| `CONFIG_BRIDGE_LED_SESSION_TIMEOUT_MS` | ditto | blue SWD state is opened by DAP Connect; 0 = only Disconnect closes it |
+| `CONFIG_BRIDGE_LED_GAMMA_X100` | ditto | breathing curve, 220 = gamma 2.2, 100 = linear |
 | `CONFIG_DEBUG_PROBE_GPIO_TCK/TMS` | `sdkconfig.defaults.esp32s3` | SWCLK / SWDIO |
 | `CONFIG_SERIAL_HANDLER_GPIO_*` | `sdkconfig.defaults.esp32s3` | target UART + BOOT/RST |
 
 Board settings live in `sdkconfig.defaults.esp32s3`, so all three role builds and
-a plain `idf.py build` use the same pins, flash size and USB identity.
+a plain `idf.py build` use the same pins, flash size and USB identity. ESP32-C6 has its own
+file, `sdkconfig.defaults.esp32c6`, which keeps the target UART on BOOT=10 / RST=9 (its BOOT
+pin moved off GPIO8, the devkit's WS2812). Only these two targets carry a board preset.
 
 ---
 

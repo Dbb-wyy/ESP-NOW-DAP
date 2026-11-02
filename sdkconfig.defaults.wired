@@ -1,0 +1,13 @@
+# Wired bridge: one chip, USB (CDC + CMSIS-DAP + mass storage) on the PC side and the
+# target UART / SWD / BOOT+RST on the other. This is the original single-board setup.
+#
+# It used to be the Kconfig default role; it is now an explicit choice, so this preset
+# keeps the wired image one flag away. Board pins / flash still come from
+# sdkconfig.defaults.esp32s3.
+#
+# Build with:
+#   idf.py -B build_wired -D SDKCONFIG=sdkconfig.wired \
+#          -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.wired" set-target esp32s3
+#   idf.py -B build_wired -D SDKCONFIG=sdkconfig.wired \
+#          -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.wired" build
+CONFIG_BRIDGE_ROLE_WIRED=y

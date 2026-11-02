@@ -28,9 +28,6 @@ sdkconfig.slave
 # My Editor settings (kept on disk, not tracked)
 .clangd
 .vscode/
-
-# Development process notes (Plan.md / Agent.md / Todo.md) live in .agent/ on
-# disk only: they document how this port was done, not the product itself.
 .agent/
 
 # docs/ is tracked. test/ and CHANGELOG.md were removed from the tree.

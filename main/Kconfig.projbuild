@@ -6,7 +6,7 @@ menu "END-config"
 
         choice BRIDGE_ROLE
             prompt "Firmware role"
-            default BRIDGE_ROLE_WIRED if SOC_USB_OTG_SUPPORTED
+            default BRIDGE_ROLE_WIRELESS_HOST if SOC_USB_OTG_SUPPORTED
             default BRIDGE_ROLE_WIRELESS_SLAVE
             help
                 Select which end of the bridge this firmware implements.
@@ -26,6 +26,11 @@ menu "END-config"
 
                 Both wireless roles require
                 "END-config -> Role configuration -> Debug interface -> CMSIS-DAP SWD".
+
+                The default is the wireless host on targets with a USB OTG controller
+                and the wireless slave on the others, so a plain build produces the
+                firmware for the board the chip can actually drive. The wired role is
+                selected explicitly; sdkconfig.defaults.wired is a ready-made preset.
 
             config BRIDGE_ROLE_WIRED
                 bool "Wired (USB only)"
@@ -135,7 +140,7 @@ menu "END-config"
 
             config BRIDGE_LED_ENABLE
                 bool "Enable the WS2812 status LED"
-                default n
+                default y
                 depends on !BRIDGE_ROLE_WIRED
                 help
                     Enables the addressable (WS2812) status LED, which reports the state
@@ -148,9 +153,10 @@ menu "END-config"
 
                     While disabled there is no LED pin at all: the pin option below is
                     not offered, no pin is configured, driven or reset, and the LED
-                    helpers compile to stubs. Leaving it off is the safe default,
-                    because a pin number that does not match the board cannot disturb
-                    anything then.
+                    helpers compile to stubs. It is enabled by default, but the pin
+                    option below starts at -1, and -1 drives nothing: the board files
+                    (sdkconfig.defaults.esp32s3 / .esp32c6) supply the real pin, so a
+                    build for another board stays silent until one is filled in.
 
                     The LED is driven from the RMT peripheral through the managed
                     component espressif/led_strip, declared in
@@ -178,17 +184,23 @@ menu "END-config"
             config BRIDGE_LED_BRIGHTNESS
                 int "Overall brightness (0-255)"
                 range 0 255
-                default 64
+                default 16
                 depends on BRIDGE_LED_ENABLE
                 help
-                    Ceiling applied to every colour. 64 is a deliberately conservative
+                    Ceiling applied to every colour. 16 is a deliberately conservative
                     starting point: a WS2812 at full brightness is uncomfortably bright
                     for a status indicator and draws a lot of current.
+
+                    It is also the number of codes the breath can use: cyan spans 0..45
+                    codes at 64, 0..22 at 32, 0..11 at 16 and only 0..5 at 8. Very low
+                    values leave so few levels that the ramp either steps or, once
+                    dithered, pulses at a few hertz; below about 16 codes the renderer
+                    stops dithering and shows the steps, so 32 and up is the smooth end.
 
             config BRIDGE_LED_ACT_WINDOW_MS
                 int "Activity window (ms)"
                 range 50 5000
-                default 500
+                default 1000
                 depends on BRIDGE_LED_ENABLE
                 help
                     How long a single SWD packet or serial burst keeps its colour on
@@ -196,10 +208,32 @@ menu "END-config"
                     commands while stepping, so a window that is too short makes the LED
                     fall back to the idle colour in the middle of a session.
 
+                    This is also the refresh rate of the state machine: the renderer
+                    samples the state once every half window and only then decides
+                    which colour and movement apply. Shorter window, snappier state
+                    changes; longer window, the colour lingers after traffic stops.
+
+            config BRIDGE_LED_SESSION_TIMEOUT_MS
+                int "SWD session timeout (ms, 0 = only Disconnect ends it)"
+                range 0 3600000
+                default 0
+                depends on BRIDGE_LED_ENABLE
+                help
+                    The blue "SWD in use" state is opened by the CMSIS-DAP Connect
+                    command and closed by Disconnect, not by the traffic itself: a
+                    debugger with a halted target can send nothing for minutes and still
+                    be in the middle of a session, so traffic cannot end the state.
+
+                    0 is the default and trusts the protocol: OpenOCD, pyOCD and
+                    probe-rs all send Disconnect when they shut down. A non-zero value is
+                    a safety net for a debugger that is killed before it can do so; the
+                    cost is that a genuinely idle session is also ended after that much
+                    silence.
+
             config BRIDGE_LED_BLINK_PERIOD_MS
                 int "Blink period (ms)"
                 range 100 10000
-                default 500
+                default 1000
                 depends on BRIDGE_LED_ENABLE
                 help
                     Length of one on/off cycle for the flashing states (link down, SWD
@@ -208,7 +242,7 @@ menu "END-config"
             config BRIDGE_LED_BLINK_ON_MS
                 int "Blink on-time (ms)"
                 range 10 10000
-                default 120
+                default 500
                 depends on BRIDGE_LED_ENABLE
                 help
                     How much of each blink period the LED is lit. Must be shorter than
@@ -217,7 +251,7 @@ menu "END-config"
             config BRIDGE_LED_BREATH_PERIOD_MS
                 int "Breathing period (ms)"
                 range 500 20000
-                default 2000
+                default 1000
                 depends on BRIDGE_LED_ENABLE
                 help
                     Length of one full fade down and back up for the idle state.
@@ -225,12 +259,27 @@ menu "END-config"
             config BRIDGE_LED_BREATH_MIN_PCT
                 int "Breathing minimum brightness (%)"
                 range 0 100
-                default 6
+                default 0
                 depends on BRIDGE_LED_ENABLE
                 help
                     Brightness at the darkest point of the breath, as a percentage of
                     full scale; the global brightness is applied on top of it. 0 lets the
                     LED go fully dark each cycle.
+
+            config BRIDGE_LED_GAMMA_X100
+                int "Breathing gamma (x100)"
+                range 100 400
+                default 220
+                depends on BRIDGE_LED_ENABLE
+                help
+                    Power law applied to the 0..255 level before it reaches the strip,
+                    given as a hundredth: 220 is gamma 2.2. A WS2812 driven straight from
+                    a linear ramp looks like it jumps near the bottom and stands still
+                    near the top, because the eye is roughly a 2.2 power law; the curve
+                    here compensates for that. 100 is the old linear ramp, for comparison.
+
+                    The 256 entry lookup table is built once at init, so trying a value
+                    costs nothing at run time.
 
         endmenu
 
