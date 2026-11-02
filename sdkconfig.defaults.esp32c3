@@ -12,25 +12,54 @@ CONFIG_IDF_TARGET="esp32c3"
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
 
-# Debug probe: CMSIS-DAP over SWD. The USB-JTAG interface is not available on this
-# target, so SWD has to be selected explicitly (the component default is JTAG).
-CONFIG_DEBUG_PROBE_IFACE_SWD=y
-CONFIG_DEBUG_PROBE_GPIO_TCK=10
-CONFIG_DEBUG_PROBE_GPIO_TMS=11
-# TDI/TDO are JTAG-only signals and are not driven in SWD mode, so they keep the
-# component defaults (3/9).
+# Console stays on UART0: TX = GPIO21, RX = GPIO20, 115200. Those two pads are
+# deliberately left unassigned below. IDF additionally mirrors console output to the
+# chip's own USB Serial/JTAG port by default (ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG -
+# non-blocking, no REPL), so watching logs over the native USB connector works without
+# changing anything; flashing works over either port as well.
 
-# Target UART and reset lines.
+# Pin map, taken from the wiring table of the actual board (2026-11-02).
+#
+# Pins an ESP32-C3 module cannot give away:
+#   GPIO11      VDD_SPI (the SPI flash supply)
+#   GPIO12..17  in-package SPI flash (SPIHD/WP/CS0/CLK/D/Q)
+#   GPIO18/19   USB D-/D+ (USB Serial/JTAG)
+#   GPIO20/21   UART0 (the console) - kept free on purpose
+#   GPIO2/8/9   strapping pins (GPIO2 carries RXD, see the note below)
+#
+# GPIO4..7 are also the built-in JTAG pins (MTMS/MTDI/MTCK/MTDO). SWCLK takes MTMS and
+# BOOT/RST take MTCK/MTDO, so this chip can no longer be debugged through its own JTAG
+# pins - use USB Serial/JTAG (GPIO18/19) for that. GPIO5 and GPIO10 are left free.
+#
+# Two pins need a note:
+#   * GPIO3 is both SWDIO and the component default for CONFIG_DEBUG_PROBE_GPIO_TDI.
+#     TDI/TDO are JTAG-only and are never driven in SWD mode, but the DAP PORT_OFF path
+#     (debugger disconnect) calls gpio_reset_pin() on them, so a disconnect also resets
+#     SWDIO. That is harmless: PORT_SWD_SETUP re-initialises both SWD pins on the next
+#     connect (same class of issue as the C6 TDO/RST overlap in .agent/Todo.md T6).
+#   * GPIO2 is one of the three strapping pins and carries RXD. serial_handler only
+#     enables the internal pull-up on it (UART idle = mark = high), which matches the
+#     level the ROM samples by default; do not attach anything that pulls it low at reset.
+CONFIG_DEBUG_PROBE_IFACE_SWD=y
+CONFIG_DEBUG_PROBE_GPIO_TCK=4
+CONFIG_DEBUG_PROBE_GPIO_TMS=3
+# TDI/TDO keep the component defaults (3/9) - they are unused in SWD mode.
+
+# Target UART and reset lines (TXD/RXD are the slave's UART1 pins, not UART0).
+# BOOT/RST sit on GPIO6/GPIO7 (the two remaining built-in JTAG pins): the user does not
+# wire them for now, and putting them here keeps UART0's pads and the strapping pins out
+# of the way. Both are open-drain with a pull-up, so they idle high at reset.
+CONFIG_SERIAL_HANDLER_GPIO_TXD=1
+CONFIG_SERIAL_HANDLER_GPIO_RXD=2
 CONFIG_SERIAL_HANDLER_GPIO_BOOT=6
 CONFIG_SERIAL_HANDLER_GPIO_RST=7
-CONFIG_SERIAL_HANDLER_GPIO_RXD=5
-CONFIG_SERIAL_HANDLER_GPIO_TXD=4
 
-# No status LED pins here: CONFIG_BRIDGE_LED_ENABLE is off by default, so no LED pin
-# is ever configured. This matters especially on this chip, where GPIO 12-17 belong
-# to the in-package SPI flash and GPIO 11 is VDD_SPI: driving them would break the
-# flash and the SWD pins, and a wrong pin here only shows up at run time, never at
-# build time. Pick the LEDs and the probe/UART pins together once the C3 board is in
-# hand (stage 4).
-# The TMS=11 above is the same kind of problem (GPIO 11 is VDD_SPI) and is also left
-# for stage 4, where the whole pin map gets re-checked against the real board.
+# Status LED: off by default. This board exposes no WS2812, and a wrong pin guess on a
+# C3 is expensive (GPIO11 is VDD_SPI, GPIO12..17 are the in-package flash). Turn it on
+# with CONFIG_BRIDGE_LED_ENABLE=y plus the real pin once the hardware is known; the
+# driver refuses pins that collide with the lines above or fall outside the chip.
+# Note that GPIO8 (the usual WS2812 pin on C3 devkits) is a strapping pin and must not
+# be held low at reset.
+
+# Verified: the map above comes from the board's own wiring table (user, 2026-11-02);
+# stage 4 replays the C6 smoke test on it, see .agent/Stage4-C3-Smoke.md.

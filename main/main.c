@@ -9,6 +9,7 @@
 #include "util.h"
 #include "esp_log.h"
 #include "esp_cpu.h"
+#include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "bridge_glue.h"
@@ -259,4 +260,9 @@ void app_main(void)
     ESP_LOGI(TAG, "ESP USB Bridge running as wireless host (USB <-> ESP-NOW)");
   #endif
 #endif
+
+    /* Startup is over: report how much heap is left. The single-core C3 has 400 KB of
+       SRAM shared with the Wi-Fi stack, so this line is the cheapest way to notice that
+       a new buffer or stack has eaten the margin. */
+    ESP_LOGI(TAG, "Free heap after start-up: %u bytes", (unsigned)esp_get_free_heap_size());
 }
