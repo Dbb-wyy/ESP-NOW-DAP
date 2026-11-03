@@ -160,7 +160,7 @@ menu "END-config"
 
                     The LED is driven from the RMT peripheral through the managed
                     component espressif/led_strip, declared in
-                    components/util/idf_component.yml.
+                    components/status_led/idf_component.yml.
 
             config BRIDGE_WS2812_GPIO
                 int "GPIO connected to the WS2812 data input (-1 = none)"
@@ -173,7 +173,7 @@ menu "END-config"
                     -1 is the default on purpose: an LED pin depends on the board, and a
                     wrong number would drive a pin that carries something else.
 
-                    led_rgb_init() rejects a pin outside the chip's GPIO range, and a pin
+                    status_led_init() rejects a pin outside the chip's GPIO range, and a pin
                     already used by the target UART or the debug probe, because a status
                     LED must never fight a functional signal.
 

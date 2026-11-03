@@ -24,7 +24,6 @@ set(priv_include_dirs
 set(dependencies
     "esp_timer"
     "hal"
-    "util"
     "esp_ringbuf"
 )
 

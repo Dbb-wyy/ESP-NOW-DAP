@@ -176,7 +176,7 @@ END-config -> Pin configuration -> Status LED
 ```
 
 引脚填 `-1` 等于关灯：LED 引脚因板而异，填错的数字会去驱动别的功能脚。
-填成已经分配给 UART、BOOT/RST 或 SWD 的引脚会被 `led_rgb_init()` 拒绝并打日志，桥本身照常工作。
+填成已经分配给 UART、BOOT/RST 或 SWD 的引脚会被 `status_led_init()` 拒绝并打日志，桥本身照常工作。
 其余观感参数（整体亮度、活动保持时间、闪烁周期与亮占比、呼吸周期与最暗百分比、呼吸 gamma）都在
 同一个菜单里，可按实际板子调；链路判定超时在 `END-config -> Wireless link -> Peer timeout`。
 呼吸曲线默认 gamma 2.2（`Breathing gamma (x100)` = 220），作用是把线性三角波换成视觉上等速的亮度变化；
@@ -431,7 +431,7 @@ END-config -> Pin configuration -> Status LED
 
 Leaving the pin at `-1` drives nothing: the LED pin is a per-board choice and a wrong number
 would drive a pin that carries something else. A pin that
-is already used by the UART, BOOT/RST or SWD is rejected by `led_rgb_init()` with a log line,
+is already used by the UART, BOOT/RST or SWD is rejected by `status_led_init()` with a log line,
 and the bridge keeps running. Brightness, the activity window, the blink period and duty, the
 breathing period and floor, and the breathing gamma are all in the same menu; the link timeout
 lives in `END-config -> Wireless link -> Peer timeout`. The breathing curve defaults to gamma 2.2

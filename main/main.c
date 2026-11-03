@@ -6,14 +6,14 @@
 
 #include <stdlib.h>
 #include "sdkconfig.h"
-#include "util.h"
+#include "eub_abort.h"
 #include "esp_log.h"
 #include "esp_cpu.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "bridge_glue.h"
-#include "led_rgb.h"
+#include "status_led.h"
 
 #if !CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE
 /* USB device stack headers: only the wired and wireless-host builds use them. */
@@ -238,7 +238,7 @@ void app_main(void)
        pin, claims it and starts the rendering task; the link state source is registered
        later, by bridge_uplink_init(), once the ESP-NOW link exists. A rejected pin (range
        or collision) must not keep the bridge from running. */
-    if (led_rgb_init() != ESP_OK) {
+    if (status_led_init() != ESP_OK) {
         ESP_LOGW(TAG, "Status LED configuration rejected, continuing without it");
     }
 

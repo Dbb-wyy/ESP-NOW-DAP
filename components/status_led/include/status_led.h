@@ -37,16 +37,16 @@
  *
  * Activity is pushed - a call site only stores a timestamp, which is a single 32 bit
  * write and therefore cheap enough for the USB and Wi-Fi callbacks - while the link
- * state is pulled through led_rgb_link_ops_t, so this module stays independent of the
+ * state is pulled through status_led_link_ops_t, so this module stays independent of the
  * wireless link implementation.
  *
  * Contract:
- *   - led_rgb_init() is called once from app_main; it validates the pin and, when
+ *   - status_led_init() is called once from app_main; it validates the pin and, when
  *     accepted, starts the rendering task. A rejected pin is reported, never fatal.
- *   - led_rgb_notify_activity() is safe from any task and never blocks.
+ *   - status_led_notify_activity() is safe from any task and never blocks.
  *   - the colour is always chosen by the state machine below; there is no API to force
  *     one, so nothing can fight it.
- *   - nothing here touches the pin before led_rgb_init() has succeeded.
+ *   - nothing here touches the pin before status_led_init() has succeeded.
  */
 
 #ifdef __cplusplus
@@ -55,10 +55,10 @@ extern "C" {
 
 /** Events that temporarily take over the LED. Order does not matter, the renderer picks. */
 typedef enum {
-    LED_RGB_ACT_SWD = 0,    /*!< a CMSIS-DAP packet was relayed in either direction */
-    LED_RGB_ACT_SERIAL,     /*!< serial bytes were relayed in either direction */
-    LED_RGB_ACT_MAX,
-} led_rgb_activity_t;
+    STATUS_LED_ACT_SWD = 0,    /*!< a CMSIS-DAP packet was relayed in either direction */
+    STATUS_LED_ACT_SERIAL,     /*!< serial bytes were relayed in either direction */
+    STATUS_LED_ACT_MAX,
+} status_led_activity_t;
 
 /**
  * Link state source. The callback is invoked from the LED task and must not block; it is
@@ -67,7 +67,7 @@ typedef enum {
  */
 typedef struct {
     bool (*link_up)(void);  /*!< true while the peer is reachable */
-} led_rgb_link_ops_t;
+} status_led_link_ops_t;
 
 /**
  * @brief Validate CONFIG_BRIDGE_WS2812_GPIO, claim the pin and start rendering.
@@ -77,16 +77,16 @@ typedef struct {
  *         already used by another bridge function (TX/RX/BOOT/RST, TCK/TMS).
  * @return ESP_ERR_NO_MEM / the RMT error when the strip could not be created.
  */
-esp_err_t led_rgb_init(void);
+esp_err_t status_led_init(void);
 
 /**
  * @brief Register the link state source. The pointer must outlive the caller's use of
  *        the LED; every current caller passes a static const structure.
  */
 #if CONFIG_BRIDGE_LED_ENABLE
-void led_rgb_set_link_ops(const led_rgb_link_ops_t *ops);
+void status_led_set_link_ops(const status_led_link_ops_t *ops);
 #else
-static inline void led_rgb_set_link_ops(const led_rgb_link_ops_t *ops) { (void)ops; }
+static inline void status_led_set_link_ops(const status_led_link_ops_t *ops) { (void)ops; }
 #endif
 
 /**
@@ -94,9 +94,9 @@ static inline void led_rgb_set_link_ops(const led_rgb_link_ops_t *ops) { (void)o
  *        the USB and Wi-Fi callbacks.
  */
 #if CONFIG_BRIDGE_LED_ENABLE
-void led_rgb_notify_activity(led_rgb_activity_t act);
+void status_led_notify_activity(status_led_activity_t act);
 #else
-static inline void led_rgb_notify_activity(led_rgb_activity_t act) { (void)act; }
+static inline void status_led_notify_activity(status_led_activity_t act) { (void)act; }
 #endif
 
 /**
@@ -108,9 +108,9 @@ static inline void led_rgb_notify_activity(led_rgb_activity_t act) { (void)act; 
  * net for a debugger that dies without sending one, refreshed by packets inside the session.
  */
 #if CONFIG_BRIDGE_LED_ENABLE
-void led_rgb_notify_swd_session(bool active);
+void status_led_notify_swd_session(bool active);
 #else
-static inline void led_rgb_notify_swd_session(bool active) { (void)active; }
+static inline void status_led_notify_swd_session(bool active) { (void)active; }
 #endif
 
 #ifdef __cplusplus

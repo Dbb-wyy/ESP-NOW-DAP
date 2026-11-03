@@ -29,7 +29,7 @@
 #include "esp_log.h"
 #include "tusb.h"
 #include "msc.h"
-#include "util.h"
+#include "eub_abort.h"
 #include "serial_handler.h"
 #include "sdkconfig.h"
 #define KB(x) ((x) * 1024)

@@ -17,10 +17,10 @@
 #include "freertos/ringbuf.h"
 #include "freertos/semphr.h"
 #include "sdkconfig.h"
-#include "util.h"
+#include "eub_abort.h"
 #include "bridge_glue.h"
 #include "serial_handler.h"
-#include "led_rgb.h"
+#include "status_led.h"
 #include "usb_phy.h"
 #include "soc/rtc_cntl_reg.h"
 
@@ -42,7 +42,7 @@ static bool download_mode_armed;
  */
 void serial_bridge_target_data_received(const uint8_t *data, size_t len)
 {
-    led_rgb_notify_activity(LED_RGB_ACT_SERIAL);
+    status_led_notify_activity(STATUS_LED_ACT_SERIAL);
 
     /*
      * bridge_uplink_init() registers the transport receive callback (and, on the

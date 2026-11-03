@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "led_rgb.h"
+#include "status_led.h"
 
 #include <math.h>
 #include <stdbool.h>
@@ -17,7 +17,7 @@
 #include "sdkconfig.h"
 #include "soc/soc_caps.h"
 
-static const char *TAG = "led_rgb";
+static const char *TAG = "status_led";
 
 /*
  * The gate is CONFIG_BRIDGE_LED_ENABLE, deliberately not the pin:
@@ -30,20 +30,20 @@ static const char *TAG = "led_rgb";
 
 #include "led_strip.h"
 
-#define LED_RGB_PIN CONFIG_BRIDGE_WS2812_GPIO
+#define STATUS_LED_PIN CONFIG_BRIDGE_WS2812_GPIO
 
 /* 100 Hz is far above what the eye needs for a breathing LED, and the renderer
    only touches the RMT peripheral when the colour actually changes. The high
    rate matters for the breathing ramp: 100 steps per second instead of 40. */
-#define LED_RGB_TICK_MS 10
+#define STATUS_LED_TICK_MS 10
 
 /* The state is sampled, never pushed. Half the activity window means an event
    can never age out between two polls; the price is at most half a window of
    latency between a change and the colour that shows it. */
-#define LED_RGB_POLL_MS (CONFIG_BRIDGE_LED_ACT_WINDOW_MS / 2)
+#define STATUS_LED_POLL_MS (CONFIG_BRIDGE_LED_ACT_WINDOW_MS / 2)
 
-#define LED_RGB_TASK_STACK 3072
-#define LED_RGB_TASK_PRIO 2
+#define STATUS_LED_TASK_STACK 3072
+#define STATUS_LED_TASK_PRIO 2
 
 /* The whole state machine. The declaration order also reads as the priority
    order of the old chain of tests, but nothing depends on the numbers. */
@@ -66,7 +66,7 @@ static const char *const k_status_name[LED_STATUS_COUNT] = {
 
 static led_strip_handle_t s_strip;
 static int s_pin = -1;
-static const led_rgb_link_ops_t *s_ops;
+static const status_led_link_ops_t *s_ops;
 /* Set by an edge that has to be seen on the next tick rather than on the next
    poll: closing a debug session must drop the blue colour at once. */
 static volatile bool s_poll_due;
@@ -75,7 +75,7 @@ static volatile bool s_poll_due;
    value, which is atomic on both the Xtensa and the RISC-V cores used here and
    cannot tear; 0 means "never", and every comparison uses the wrap safe
    difference. */
-static volatile uint32_t s_activity_ms[LED_RGB_ACT_MAX];
+static volatile uint32_t s_activity_ms[STATUS_LED_ACT_MAX];
 
 /* A CMSIS-DAP session is an edge, not traffic: DAP_Connect opens it and
    DAP_Disconnect closes it. The timestamp is refreshed by every DAP packet
@@ -89,7 +89,7 @@ static volatile uint32_t s_swd_session_ms;
 static uint8_t s_shown[3];
 static bool s_shown_valid;
 
-#if LED_RGB_PIN >= 0
+#if STATUS_LED_PIN >= 0
 /* Pins the rest of the firmware drives. A collision would make the status LED
    fight a functional signal (the C3 in-package flash pins are exactly this
    failure), so a hit is reported as a configuration error instead of being
@@ -109,11 +109,11 @@ static const struct {
     {"CONFIG_DEBUG_PROBE_GPIO_TDO", CONFIG_DEBUG_PROBE_GPIO_TDO},
 #endif
 };
-#endif /* LED_RGB_PIN >= 0 */
+#endif /* STATUS_LED_PIN >= 0 */
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
-static bool activity_recent(led_rgb_activity_t act, uint32_t now) {
+static bool activity_recent(status_led_activity_t act, uint32_t now) {
     const uint32_t last = s_activity_ms[act];
 
     return last != 0 &&
@@ -169,7 +169,7 @@ static uint32_t breath_level(uint32_t now) {
  * A strip takes 8 bits per channel, but spreading a linear ramp over those 8
  * bits does not look linear: the eye is roughly a 2.2 power law, which is what
  * makes an untouched triangle wave look like it steps near the bottom and
- * stalls near the top. The table is built once in led_rgb_init(), before the
+ * stalls near the top. The table is built once in status_led_init(), before the
  * rendering task exists.
  */
 static uint8_t s_gamma_lut[256];
@@ -192,11 +192,11 @@ static void build_gamma_lut(void) {
  * brightness of 64 and 0..6 at brightness 8. Rounding the ramp to whole codes
  * therefore advances it in steps of a sixth of its range, which looks exactly
  * like an LED that refreshes two or three times a second - however often the
- * task actually runs and whatever LED_RGB_TICK_MS says. Carrying the rounding
+ * task actually runs and whatever STATUS_LED_TICK_MS says. Carrying the rounding
  * error into the next frame turns every step into a duty cycle, so the average
  * over a few frames follows the curve continuously. That average is what the
  * eye integrates, but only while the pulses are small or frequent enough: see
- * LED_RGB_DITHER_MIN_PEAK below for the case where they are not.
+ * STATUS_LED_DITHER_MIN_PEAK below for the case where they are not.
  */
 static uint32_t s_dither[3];
 
@@ -210,7 +210,7 @@ static uint32_t s_dither[3];
  * lesser of the two artefacts. The number is the peak of the style, not the
  * level of this frame, so the choice does not change in the middle of a breath.
  */
-#define LED_RGB_DITHER_MIN_PEAK 16
+#define STATUS_LED_DITHER_MIN_PEAK 16
 
 /* Write one colour at the given level, applying the global brightness ceiling
    and, where it is safe, the dithering carry above. Repeated colours are still
@@ -225,7 +225,7 @@ static void led_write(uint8_t red, uint8_t green, uint8_t blue,
     const uint32_t peak = ((uint32_t)top * CONFIG_BRIDGE_LED_BRIGHTNESS) / 255u;
     uint8_t scaled[3];
 
-    if (peak < LED_RGB_DITHER_MIN_PEAK) {
+    if (peak < STATUS_LED_DITHER_MIN_PEAK) {
         /* Round: a one code pulse here would be a visible flicker. */
         for (unsigned i = 0; i < 3; i++) {
             scaled[i] = (uint8_t)(((uint32_t)src[i] * gain + 32512u) / 65025u);
@@ -321,14 +321,14 @@ static void led_apply_status(led_status_t status, uint32_t now) {
 /*
  * Answers one question and changes nothing: what state is the bridge in now?
  * The link is pulled, never latched here, so an unregistered source (the few
- * milliseconds between led_rgb_init() and bridge_uplink_init(), or a failed
+ * milliseconds between status_led_init() and bridge_uplink_init(), or a failed
  * wlink_init()) reports "down" rather than pretending the link is fine.
  */
 static led_status_t led_sample_status(uint32_t now) {
     const bool up = s_ops != NULL && s_ops->link_up != NULL && s_ops->link_up();
     const bool swd =
-        swd_session_active(now) || activity_recent(LED_RGB_ACT_SWD, now);
-    const bool serial = activity_recent(LED_RGB_ACT_SERIAL, now);
+        swd_session_active(now) || activity_recent(STATUS_LED_ACT_SWD, now);
+    const bool serial = activity_recent(STATUS_LED_ACT_SERIAL, now);
 
     if (!up) {
         return LED_STATUS_LINK_DOWN;
@@ -349,12 +349,12 @@ static led_status_t led_sample_status(uint32_t now) {
     return LED_STATUS_IDLE;
 }
 
-static void led_rgb_task(void *arg) {
+static void status_led_task(void *arg) {
     (void)arg;
 
     TickType_t wake = xTaskGetTickCount();
     /* One poll immediately, so the first frame is already the real state. */
-    uint32_t last_poll = now_ms() - LED_RGB_POLL_MS;
+    uint32_t last_poll = now_ms() - STATUS_LED_POLL_MS;
     led_status_t status = LED_STATUS_LINK_DOWN;
 
     for (;;) {
@@ -365,7 +365,7 @@ static void led_rgb_task(void *arg) {
          * animates it. A half window sample can never drive a one second
          * breathing ramp, which is why the drawing stays on the tick.
          */
-        if (s_poll_due || (uint32_t)(now - last_poll) >= LED_RGB_POLL_MS) {
+        if (s_poll_due || (uint32_t)(now - last_poll) >= STATUS_LED_POLL_MS) {
             last_poll = now;
             s_poll_due = false;
 
@@ -385,12 +385,12 @@ static void led_rgb_task(void *arg) {
         }
 
         led_apply_status(status, now);
-        vTaskDelayUntil(&wake, pdMS_TO_TICKS(LED_RGB_TICK_MS));
+        vTaskDelayUntil(&wake, pdMS_TO_TICKS(STATUS_LED_TICK_MS));
     }
 }
 
-esp_err_t led_rgb_init(void) {
-    const int pin = LED_RGB_PIN;
+esp_err_t status_led_init(void) {
+    const int pin = STATUS_LED_PIN;
 
     if (pin < 0) {
         ESP_LOGI(TAG, "No WS2812 status LED configured "
@@ -406,7 +406,7 @@ esp_err_t led_rgb_init(void) {
         return ESP_ERR_INVALID_ARG;
     }
 
-#if LED_RGB_PIN >= 0
+#if STATUS_LED_PIN >= 0
     for (size_t i = 0; i < sizeof(s_used_pins) / sizeof(s_used_pins[0]); i++) {
         if (s_used_pins[i].pin == pin) {
             ESP_LOGE(TAG, "CONFIG_BRIDGE_WS2812_GPIO=%d collides with %s", pin,
@@ -444,8 +444,8 @@ esp_err_t led_rgb_init(void) {
     led_strip_clear(s_strip);
     build_gamma_lut();
 
-    if (xTaskCreate(led_rgb_task, "led_rgb", LED_RGB_TASK_STACK, NULL,
-                    LED_RGB_TASK_PRIO, NULL) != pdPASS) {
+    if (xTaskCreate(status_led_task, "status_led", STATUS_LED_TASK_STACK, NULL,
+                    STATUS_LED_TASK_PRIO, NULL) != pdPASS) {
         ESP_LOGE(TAG, "Cannot start the status LED task");
         led_strip_del(s_strip);
         s_strip = NULL;
@@ -457,10 +457,10 @@ esp_err_t led_rgb_init(void) {
     return ESP_OK;
 }
 
-void led_rgb_set_link_ops(const led_rgb_link_ops_t *ops) { s_ops = ops; }
+void status_led_set_link_ops(const status_led_link_ops_t *ops) { s_ops = ops; }
 
-void led_rgb_notify_activity(led_rgb_activity_t act) {
-    if ((unsigned)act >= (unsigned)LED_RGB_ACT_MAX) {
+void status_led_notify_activity(status_led_activity_t act) {
+    if ((unsigned)act >= (unsigned)STATUS_LED_ACT_MAX) {
         return;
     }
 
@@ -468,12 +468,12 @@ void led_rgb_notify_activity(led_rgb_activity_t act) {
     const uint32_t stamp = now_ms() | 1u;
     s_activity_ms[act] = stamp;
 
-    if (act == LED_RGB_ACT_SWD && s_swd_session) {
+    if (act == STATUS_LED_ACT_SWD && s_swd_session) {
         s_swd_session_ms = stamp; /* a session that keeps talking stays alive */
     }
 }
 
-void led_rgb_notify_swd_session(bool active) {
+void status_led_notify_swd_session(bool active) {
     if (active) {
         s_swd_session_ms = now_ms() | 1u;
         s_swd_session = true;
@@ -483,13 +483,13 @@ void led_rgb_notify_swd_session(bool active) {
     s_swd_session = false;
     /* Drop the traffic stamp as well, so the blue state ends now rather than
        one activity window later. */
-    s_activity_ms[LED_RGB_ACT_SWD] = 0;
+    s_activity_ms[STATUS_LED_ACT_SWD] = 0;
     s_poll_due = true; /* and re-sample on the next tick, not the next poll */
 }
 
 #else /* !CONFIG_BRIDGE_LED_ENABLE */
 
-esp_err_t led_rgb_init(void) {
+esp_err_t status_led_init(void) {
     /* No pin is claimed, so there is nothing to validate and nothing to touch.
      */
     ESP_LOGI(TAG, "Status LED disabled (CONFIG_BRIDGE_LED_ENABLE=n), no LED "

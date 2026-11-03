@@ -16,7 +16,7 @@
 #include "eub_vendord.h"
 #include "bridge_glue.h"
 #include "usb_defs.h"
-#include "util.h"
+#include "eub_abort.h"
 
 static const char *TAG = "eub_vendor";
 #define USB_BUSY_TOUT_US    100000 /* 100ms */

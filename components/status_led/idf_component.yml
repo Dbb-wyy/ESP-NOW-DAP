@@ -1,0 +1,8 @@
+## IDF Component Manager Manifest File
+#
+# The status LED is a WS2812 strip driven through RMT. There is no target restriction:
+# RMT exists on every supported target, and the component compiles down to a stub when
+# CONFIG_BRIDGE_LED_ENABLE is off (always the case for the wired role, see
+# main/Kconfig.projbuild).
+dependencies:
+  espressif/led_strip: "^3.0.0"
