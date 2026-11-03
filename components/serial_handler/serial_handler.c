@@ -37,9 +37,6 @@
 
 static const char *TAG = "serial_handler";
 
-static serial_tx_notify_cb_t s_tx_callback = NULL;
-static serial_rx_notify_cb_t s_rx_callback = NULL;
-
 // Reset timer handle
 static esp_timer_handle_t s_reset_timer = NULL;
 
@@ -62,30 +59,6 @@ typedef struct {
 
 static transport_state_t s_transport = {0};
 
-void serial_handler_register_tx_activity_callback(serial_tx_notify_cb_t callback)
-{
-    s_tx_callback = callback;
-}
-
-void serial_handler_register_rx_activity_callback(serial_rx_notify_cb_t callback)
-{
-    s_rx_callback = callback;
-}
-
-static void serial_notify_tx_activity(bool active)
-{
-    if (s_tx_callback) {
-        s_tx_callback(active);
-    }
-}
-
-static void serial_notify_rx_activity(bool active)
-{
-    if (s_rx_callback) {
-        s_rx_callback(active);
-    }
-}
-
 // UART event handling task
 static void uart_event_task(void *pvParameters)
 {
@@ -93,9 +66,7 @@ static void uart_event_task(void *pvParameters)
     uint8_t dtmp[SLAVE_UART_BUF_SIZE];
 
     while (1) {
-        serial_notify_rx_activity(false);
         if (xQueueReceive(s_transport.uart_queue, &event, portMAX_DELAY)) {
-            serial_notify_rx_activity(true);
             switch (event.type) {
             case UART_DATA:
                 // Only call callback if not flashing and callback is registered
@@ -217,11 +188,6 @@ esp_err_t serial_handler_init(transport_type_t type)
     return ret;
 }
 
-bool serial_handler_is_flashing(void)
-{
-    return atomic_load(&s_transport.is_flashing);
-}
-
 bool serial_handler_is_reset_active(void)
 {
     return (s_reset_timer != NULL) && esp_timer_is_active(s_reset_timer);
@@ -251,9 +217,7 @@ esp_err_t serial_handler_send_data(const uint8_t *data, size_t len)
 
     switch (s_transport.type) {
     case TRANSPORT_TYPE_UART: {
-        serial_notify_tx_activity(true);
         const int transferred = uart_write_bytes(SLAVE_UART_NUM, data, len);
-        serial_notify_tx_activity(false);
         if (transferred != len) {
             ESP_LOGW(TAG, "uart_write_bytes transferred %d bytes only!", transferred);
             return ESP_ERR_INVALID_SIZE;

@@ -45,10 +45,6 @@ static const char *TAG = "led_rgb";
 #define LED_RGB_TASK_STACK 3072
 #define LED_RGB_TASK_PRIO 2
 
-/* How long an explicit led_rgb_set() survives before the state machine takes
- * over. */
-#define LED_RGB_MANUAL_HOLD_MS 1000
-
 /* The whole state machine. The declaration order also reads as the priority
    order of the old chain of tests, but nothing depends on the numbers. */
 typedef enum {
@@ -87,11 +83,6 @@ static volatile uint32_t s_activity_ms[LED_RGB_ACT_MAX];
    that died without closing it. */
 static volatile bool s_swd_session;
 static volatile uint32_t s_swd_session_ms;
-
-/* Automatic rendering is suspended until this timestamp after an explicit
-   led_rgb_set(), so a caller asking for a colour is not fought by the state
-   machine. 0 = no override. */
-static volatile uint32_t s_manual_until_ms;
 
 /* Last colour handed to the strip, so an unchanged frame costs nothing at all.
  */
@@ -358,19 +349,6 @@ static led_status_t led_sample_status(uint32_t now) {
     return LED_STATUS_IDLE;
 }
 
-static bool manual_override_active(uint32_t now) {
-    return s_manual_until_ms != 0 &&
-           (uint32_t)(now - s_manual_until_ms) < LED_RGB_MANUAL_HOLD_MS;
-}
-
-static void led_render(led_status_t status, uint32_t now) {
-    if (manual_override_active(now)) {
-        return; /* an explicitly requested colour is showing */
-    }
-
-    led_apply_status(status, now);
-}
-
 static void led_rgb_task(void *arg) {
     (void)arg;
 
@@ -406,7 +384,7 @@ static void led_rgb_task(void *arg) {
             }
         }
 
-        led_render(status, now);
+        led_apply_status(status, now);
         vTaskDelayUntil(&wake, pdMS_TO_TICKS(LED_RGB_TICK_MS));
     }
 }
@@ -479,8 +457,6 @@ esp_err_t led_rgb_init(void) {
     return ESP_OK;
 }
 
-bool led_rgb_is_available(void) { return s_strip != NULL; }
-
 void led_rgb_set_link_ops(const led_rgb_link_ops_t *ops) { s_ops = ops; }
 
 void led_rgb_notify_activity(led_rgb_activity_t act) {
@@ -511,26 +487,6 @@ void led_rgb_notify_swd_session(bool active) {
     s_poll_due = true; /* and re-sample on the next tick, not the next poll */
 }
 
-esp_err_t led_rgb_set(uint8_t red, uint8_t green, uint8_t blue) {
-    if (s_strip == NULL) {
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    s_manual_until_ms = now_ms() | 1u;
-    led_write(red, green, blue, 255);
-    return ESP_OK;
-}
-
-esp_err_t led_rgb_off(void) {
-    if (s_strip == NULL) {
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    s_manual_until_ms = 0; /* hand control back to the state machine */
-    led_write(0, 0, 0, 255);
-    return ESP_OK;
-}
-
 #else /* !CONFIG_BRIDGE_LED_ENABLE */
 
 esp_err_t led_rgb_init(void) {
@@ -540,16 +496,5 @@ esp_err_t led_rgb_init(void) {
                   "pin is reserved or driven");
     return ESP_OK;
 }
-
-bool led_rgb_is_available(void) { return false; }
-
-esp_err_t led_rgb_set(uint8_t red, uint8_t green, uint8_t blue) {
-    (void)red;
-    (void)green;
-    (void)blue;
-    return ESP_ERR_NOT_SUPPORTED;
-}
-
-esp_err_t led_rgb_off(void) { return ESP_ERR_NOT_SUPPORTED; }
 
 #endif /* CONFIG_BRIDGE_LED_ENABLE */

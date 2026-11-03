@@ -347,11 +347,6 @@ bool wlink_peer_ready(void)
     return s_peer_ready;
 }
 
-void wlink_peer_mac(uint8_t out[6])
-{
-    memcpy(out, s_peer_mac, ESP_NOW_ETH_ALEN);
-}
-
 bool wlink_link_up(void)
 {
     const uint32_t last = s_peer_last_seen_ms;
@@ -364,25 +359,9 @@ bool wlink_link_up(void)
     return (wlink_now_ms() - last) < CONFIG_WLINK_PEER_TIMEOUT_MS;
 }
 
-uint32_t wlink_peer_last_seen_ms(void)
-{
-    const uint32_t last = s_peer_last_seen_ms;
-
-    if (last == 0) {
-        return 0;
-    }
-
-    return wlink_now_ms() - last;
-}
-
 uint8_t wlink_next_seq(void)
 {
     return s_seq++;
-}
-
-wlink_role_t wlink_get_role(void)
-{
-    return s_role;
 }
 
 const char *wlink_msg_type_str(wlink_msg_type_t type)

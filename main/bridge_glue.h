@@ -86,7 +86,6 @@ uint8_t *bridge_probe_get_data_to_send(size_t *len, TickType_t timeout);
 void bridge_probe_free_sent_data(uint8_t *data);
 debug_probe_cmd_response_t bridge_probe_handle_command(uint8_t cmd, uint16_t wValue);
 int bridge_probe_get_proto_caps(void *dest);
-void bridge_probe_register_activity_callback(debug_activity_notify_cb_t callback);
 void bridge_probe_handle_esp32_tdi_bootstrapping(bool rebooting);
 
 #ifdef __cplusplus

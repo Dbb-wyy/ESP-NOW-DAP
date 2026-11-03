@@ -43,10 +43,9 @@
  * Contract:
  *   - led_rgb_init() is called once from app_main; it validates the pin and, when
  *     accepted, starts the rendering task. A rejected pin is reported, never fatal.
- *   - led_rgb_is_available() reports whether the LED can actually be driven.
  *   - led_rgb_notify_activity() is safe from any task and never blocks.
- *   - led_rgb_set()/led_rgb_off() override the state machine for a short while and are
- *     the only calls that may block, for one WS2812 frame (~30 us).
+ *   - the colour is always chosen by the state machine below; there is no API to force
+ *     one, so nothing can fight it.
  *   - nothing here touches the pin before led_rgb_init() has succeeded.
  */
 
@@ -62,13 +61,12 @@ typedef enum {
 } led_rgb_activity_t;
 
 /**
- * Link state source. Both callbacks are invoked from the LED task and must not block;
- * @p link_up is expected to be cheap, it runs once per state poll, that is every
+ * Link state source. The callback is invoked from the LED task and must not block; it is
+ * expected to be cheap, it runs once per state poll, that is every
  * CONFIG_BRIDGE_LED_ACT_WINDOW_MS / 2 milliseconds.
  */
 typedef struct {
-    bool (*link_up)(void);              /*!< true while the peer is reachable */
-    uint32_t (*peer_last_seen_ms)(void);/*!< milliseconds since the last frame, 0 = never */
+    bool (*link_up)(void);  /*!< true while the peer is reachable */
 } led_rgb_link_ops_t;
 
 /**
@@ -80,9 +78,6 @@ typedef struct {
  * @return ESP_ERR_NO_MEM / the RMT error when the strip could not be created.
  */
 esp_err_t led_rgb_init(void);
-
-/** @brief Whether the LED is actually being driven. */
-bool led_rgb_is_available(void);
 
 /**
  * @brief Register the link state source. The pointer must outlive the caller's use of
@@ -117,18 +112,6 @@ void led_rgb_notify_swd_session(bool active);
 #else
 static inline void led_rgb_notify_swd_session(bool active) { (void)active; }
 #endif
-
-/**
- * @brief Show one colour for about a second, then resume the state machine.
- *
- * @return ESP_OK, or ESP_ERR_INVALID_STATE when the LED is not available.
- */
-esp_err_t led_rgb_set(uint8_t red, uint8_t green, uint8_t blue);
-
-/**
- * @brief Turn the LED off immediately and hand control back to the state machine.
- */
-esp_err_t led_rgb_off(void);
 
 #ifdef __cplusplus
 }

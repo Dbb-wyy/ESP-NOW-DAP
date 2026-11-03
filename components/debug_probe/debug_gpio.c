@@ -24,19 +24,6 @@ static int s_debug_gpio_init = 0;
 
 static const char *TAG = "debug_gpio";
 
-static debug_activity_notify_cb_t s_activity_callback = NULL;
-
-void debug_probe_register_activity_callback(
-    debug_activity_notify_cb_t callback) {
-    s_activity_callback = callback;
-}
-
-void debug_probe_notify_activity(bool active) {
-    if (s_activity_callback) {
-        s_activity_callback(active);
-    }
-}
-
 #if CONFIG_DEBUG_PROBE_IFACE_JTAG
 
 void debug_probe_init_jtag_pins(void) {

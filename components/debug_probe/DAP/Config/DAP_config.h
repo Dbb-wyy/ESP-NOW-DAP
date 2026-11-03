@@ -508,9 +508,7 @@ __STATIC_INLINE void LED_CONNECTED_OUT (uint32_t bit) {}
            - 1: Target Running LED ON: program execution in target started.
            - 0: Target Running LED OFF: program execution in target stopped.
 */
-__STATIC_INLINE void LED_RUNNING_OUT (uint32_t bit) {
-    debug_probe_swd_blink(bit);
-}
+__STATIC_INLINE void LED_RUNNING_OUT (uint32_t bit) { (void)bit; }
 
 ///@}
 

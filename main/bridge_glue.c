@@ -602,7 +602,6 @@ static void bridge_on_link_serial(const wlink_hdr_t *hdr, const uint8_t *payload
  */
 static const led_rgb_link_ops_t k_led_link_ops = {
     .link_up = wlink_link_up,
-    .peer_last_seen_ms = wlink_peer_last_seen_ms,
 };
 
 #endif /* !CONFIG_BRIDGE_ROLE_WIRED */
@@ -822,11 +821,6 @@ int bridge_probe_get_proto_caps(void *dest)
     return 0;
 }
 
-void bridge_probe_register_activity_callback(debug_activity_notify_cb_t callback)
-{
-    (void)callback;  /* nothing to notify: the host side has no local activity LED */
-}
-
 void bridge_probe_handle_esp32_tdi_bootstrapping(bool rebooting)
 {
     (void)rebooting;  /* the JTAG/SWD pins are on the slave */
@@ -862,11 +856,6 @@ debug_probe_cmd_response_t bridge_probe_handle_command(uint8_t cmd, uint16_t wVa
 int bridge_probe_get_proto_caps(void *dest)
 {
     return debug_probe_get_proto_caps(dest);
-}
-
-void bridge_probe_register_activity_callback(debug_activity_notify_cb_t callback)
-{
-    debug_probe_register_activity_callback(callback);
 }
 
 void bridge_probe_handle_esp32_tdi_bootstrapping(bool rebooting)

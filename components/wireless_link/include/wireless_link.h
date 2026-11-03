@@ -96,9 +96,6 @@ esp_err_t wlink_send(wlink_msg_type_t type, uint8_t sub, uint8_t seq, const void
 /** @brief true once the opposite role has been discovered. */
 bool wlink_peer_ready(void);
 
-/** @brief Copy the peer MAC address into @p out (6 bytes). */
-void wlink_peer_mac(uint8_t out[6]);
-
 /**
  * @brief Whether frames have been received from the peer recently.
  *
@@ -112,16 +109,8 @@ void wlink_peer_mac(uint8_t out[6]);
  */
 bool wlink_link_up(void);
 
-/**
- * @brief Milliseconds since the last frame from the peer, 0 when none was ever received.
- */
-uint32_t wlink_peer_last_seen_ms(void);
-
 /** @brief Get the next sequence number for a message type. */
 uint8_t wlink_next_seq(void);
-
-/** @brief Role this device was initialised with. */
-wlink_role_t wlink_get_role(void);
 
 /** @brief Human readable name of a message type, for logging. */
 const char *wlink_msg_type_str(wlink_msg_type_t type);

@@ -38,38 +38,6 @@ typedef enum {
 typedef void (*transport_data_received_cb_t)(const uint8_t *data, size_t len);
 
 /**
- * @brief Serial TX activity notification callback
- * @param active true when transmitting data, false when TX idle
- */
-typedef void (*serial_tx_notify_cb_t)(bool active);
-
-/**
- * @brief Serial RX activity notification callback
- * @param active true when receiving data, false when RX idle
- */
-typedef void (*serial_rx_notify_cb_t)(bool active);
-
-/**
- * @brief Register callback for serial TX activity notifications
- *
- * This callback will be called to indicate UART TX activity.
- * Useful for driving TX activity LEDs or other status indicators.
- *
- * @param callback Callback function, can be NULL to disable notifications
- */
-void serial_handler_register_tx_activity_callback(serial_tx_notify_cb_t callback);
-
-/**
- * @brief Register callback for serial RX activity notifications
- *
- * This callback will be called to indicate UART RX activity.
- * Useful for driving RX activity LEDs or other status indicators.
- *
- * @param callback Callback function, can be NULL to disable notifications
- */
-void serial_handler_register_rx_activity_callback(serial_rx_notify_cb_t callback);
-
-/**
  * @brief Register callback for received data
  *
  * The callback will be invoked when data is received, but ONLY when
@@ -189,13 +157,6 @@ esp_err_t serial_handler_flash_finish(bool reboot);
  * @return true if reset timer is active (target is being reset), false otherwise
  */
 bool serial_handler_is_reset_active(void);
-
-/**
- * @brief Check if flashing is currently in progress
- *
- * @return true if flashing is active, false otherwise
- */
-bool serial_handler_is_flashing(void);
 
 /**
  * @brief Set target boot and reset pin levels

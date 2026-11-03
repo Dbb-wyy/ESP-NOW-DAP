@@ -17,4 +17,3 @@
 #define MS_OS_20_DESC_LEN  0xB2
 
 void eub_vendord_start(void);
-int eub_vendord_send_item(const void *buf, const size_t size);

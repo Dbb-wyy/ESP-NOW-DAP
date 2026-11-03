@@ -98,12 +98,6 @@ void debug_probe_init_swd_pins(void);
  */
 void debug_probe_reset_pins(void);
 
-/**
- * @brief Notify debug activity
- * @param active true when debug activity is happening, false when idle
- */
-void debug_probe_notify_activity(bool active);
-
 /* High-performance inline GPIO functions for debug operations */
 
 __STATIC_FORCEINLINE void debug_probe_swdio_out_enable(void) {
@@ -143,18 +137,6 @@ __STATIC_FORCEINLINE void debug_probe_swdio_write(int val) {
     // dedic_gpio_cpu_ll_write_mask(GPIO_SWDIO_OUT_MASK, (val & 0x01) ?
     // GPIO_SWDIO_OUT_MASK : 0);
     gpio_ll_set_level(dedic_gpio_dev, GPIO_SWDIO, (val & 0x1) ? 1 : 0);
-}
-
-__STATIC_FORCEINLINE void debug_probe_swd_blink(int on) {
-    debug_probe_notify_activity(on);
-}
-
-__STATIC_FORCEINLINE void debug_probe_jtag_led_off(void) {
-    debug_probe_notify_activity(false);
-}
-
-__STATIC_FORCEINLINE void debug_probe_jtag_led_on(void) {
-    debug_probe_notify_activity(true);
 }
 
 __STATIC_FORCEINLINE int debug_probe_tdo_read(void) {
