@@ -1,4 +1,4 @@
-set(priv_requires esp-serial-flasher freertos esp_timer)
+set(priv_requires freertos esp_timer)
 
 # Starting from esp-idf v5.3, the GPIO and UART drivers are moved to separate components
 if("${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}" VERSION_GREATER_EQUAL "5.3")

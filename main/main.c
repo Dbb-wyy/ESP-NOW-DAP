@@ -25,22 +25,12 @@
 #include "usb_phy.h"
 #endif
 
-#if CONFIG_BRIDGE_ROLE_WIRED
-#include "msc.h"
-#endif
-
 static const char *TAG = "bridge_main";
 
 #if !CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE
 /* USB descriptors and tinyusb callbacks: wired and wireless host only. */
 
-#if CONFIG_BRIDGE_ROLE_WIRED
-#define TUSB_DESC_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_VENDOR_DESC_LEN + TUD_MSC_DESC_LEN)
-#else
-/* The wireless host does not expose a mass storage disk: flashing happens over the
-   serial tunnel with the host esptool, so there is nothing to drag an UF2 onto. */
 #define TUSB_DESC_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_VENDOR_DESC_LEN)
-#endif
 
 static const tusb_desc_device_t descriptor_config = {
     .bLength = sizeof(descriptor_config),
@@ -87,11 +77,6 @@ static uint8_t const desc_configuration[] = {
 
     // Interface number, string index, EP Out & IN address, EP size
     TUD_VENDOR_EUB_DESCRIPTOR(ITF_NUM_VENDOR, EUB_VENDORD_IFACE_STR_IDX, EPNUM_VENDOR, 0x80 | EPNUM_VENDOR, 64),
-
-#if CONFIG_BRIDGE_ROLE_WIRED
-    // Interface number, string index, EP Out & EP In address, EP size
-    TUD_MSC_DESCRIPTOR(ITF_NUM_MSC, 6, EPNUM_MSC, 0x80 | EPNUM_MSC, 64),
-#endif
 };
 
 #define MAC_BYTES       6
@@ -109,7 +94,6 @@ static char const *string_desc_arr[] = {
     serial_descriptor,             // 3: Serials
     "CDC",
     CONFIG_DEBUG_PROBE_IFACE_NAME, // JTAG or CMSIS-DAP
-    "MSC",
 
     /* JTAG_STR_DESC_INX 0x0A */
 };
@@ -221,10 +205,6 @@ static void start_usb_device(void)
     ESP_ERROR_CHECK(serial_bridge_init());
 
     tusb_init();
-
-#if CONFIG_BRIDGE_ROLE_WIRED
-    msc_init();
-#endif
 
     // dedic_gpio bundles are CPU-local; task must run on the same core that created them
     xTaskCreatePinnedToCore(tusb_device_task, "tusb_device_task", 4 * 1024, NULL, 5, NULL, esp_cpu_get_core_id());

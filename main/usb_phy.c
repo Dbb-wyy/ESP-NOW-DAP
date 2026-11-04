@@ -34,10 +34,10 @@ esp_err_t eub_usb_phy_init(void)
 void eub_usb_phy_deinit(void)
 {
     /*
-     * Detach from the bus before tearing down the PHY. With MSC mounted, the host
-     * keeps bulk transfers in flight; deleting the PHY / reconfiguring the pads
-     * while those are active can hang the teardown path so download-mode entry
-     * never completes until the volume is ejected.
+     * Detach from the bus before tearing down the PHY. With bulk transfers still in
+     * flight from the host, deleting the PHY / reconfiguring the pads while those
+     * are active can hang the teardown path so download-mode entry never completes
+     * until the host stops using the interface.
      */
     tud_disconnect();
     esp_rom_delay_us(10 * 1000);

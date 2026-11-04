@@ -33,10 +33,7 @@ if(bridge_usb_stack)
     list(APPEND dependencies "tinyusb" "usb")
 endif()
 
-if(CONFIG_BRIDGE_ROLE_WIRED)
-    # The mass storage / UF2 interface only exists in the wired build.
-    list(APPEND srcs "msc.c")
-else()
+if(NOT CONFIG_BRIDGE_ROLE_WIRED)
     list(APPEND dependencies "wireless_link")
 endif()
 

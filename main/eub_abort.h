@@ -7,7 +7,7 @@
 #pragma once
 
 /*
- * Fatal error handling for the USB, MSC and serial bridges.
+ * Fatal error handling for the USB and serial bridges.
  *
  * The bridge has no user interface to report a fault through, so the only record is
  * the log line the caller prints right before giving up; eub_abort() just stops the

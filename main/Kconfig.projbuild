@@ -371,12 +371,6 @@ menu "END-config"
             help
                 Product name string shown in USB device descriptor
 
-        config BRIDGE_MSC_VOLUME_LABEL
-            string "Volume label shown in the MSC disc"
-            default "ESPPROG_MSC"
-            help
-                Volume label shown in the MSC disc. Max length is 11 ASCII characters.
-
         config BRIDGE_DOWNLOAD_MAGIC_BAUD
             int "Magic baud rate to enter download mode"
             default 1200

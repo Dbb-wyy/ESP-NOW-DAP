@@ -8,3 +8,11 @@ dependencies:
     version: "^0.18.0~2"
     rules:
       - if: "target in [esp32s2, esp32s3]"
+  # The USB PHY helpers (esp_private/usb_phy.h) live in the out-of-tree "usb"
+  # component since IDF 6.0. It used to arrive transitively through
+  # esp-serial-flasher; after the flashing chain was removed (A0) it has to be
+  # declared here, for the same USB-capable targets as tinyusb.
+  espressif/usb:
+    version: "^1.0.0"
+    rules:
+      - if: "target in [esp32s2, esp32s3]"
