@@ -36,9 +36,10 @@ whenToUse: 用户要求烧录、上板验证或抓启动日志时。
 ## 2. 读固件身份（构建目录必须在，且比源码新）
 
 ```bash
-python3 - <<'EOF'
+V=slave_c6   # 换成目标变体
+python3 - "$V" <<'EOF'
 import json, os, sys
-d = sys.argv[1] if len(sys.argv) > 1 else "build_r_wired"
+d = f"build_r_{sys.argv[1]}"
 cfg = json.load(open(f"{d}/config/sdkconfig.json"))
 roles = [k for k, v in cfg.items() if k.startswith("BRIDGE_ROLE_") and v is True]
 print("target:", cfg.get("IDF_TARGET"), "| roles:", roles, "| led:", cfg.get("BRIDGE_LED_ENABLE"))
@@ -121,6 +122,17 @@ s.close()
 print(b"".join(out).decode("utf-8", "replace"))
 EOF
 ```
+
+**兜底（实测偶发）**：若 12 秒读到 0 字节，先别判失败，做一次显式复位再读一次：
+
+```bash
+esptool --port <PORT> --after hard-reset chip-id
+# 然后重跑上面的读取脚本（只重试一次）
+```
+
+实测中 `idf.py flash` 结束后的自动复位可能没有让应用真正启动（端口 12–20 秒无输出），
+显式复位后日志立即出现；第二次烧录同一固件后直接读就正常 —— 属偶发，不是烧录失败。
+仍无输出 → 按 §7 报告，不重复复位。
 
 备选（用户在场、需要交互）：`idf.py -B build_r_<v> -p <PORT> monitor`（退出 `Ctrl+]`）。
 

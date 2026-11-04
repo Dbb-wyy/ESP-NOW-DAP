@@ -15,6 +15,11 @@ sdkconfig.wired
 sdkconfig.host
 sdkconfig.slave
 
+# 重构验收用的构建目录/配置/日志（esp-idf-build / esp-idf-flash 技能生成）
+build_r_*/
+sdkconfig.r_*
+build_r_*.log
+
 # CI configuration and personal tool config are kept on disk but intentionally
 # untracked: the workflows referenced Espressif's internal Jira/Launchpad/danger
 # infrastructure and do not apply to this fork.
