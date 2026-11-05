@@ -161,18 +161,21 @@ static void bridge_on_uart_data(const uint8_t *data, size_t len)
 
 /* ============================================================== wireless link side */
 
-#if !CONFIG_BRIDGE_ROLE_WIRED
-
 /*
  * The CMSIS-DAP bulk backend carries no report ID, so the command is always the
  * first payload byte. Watching it gives the status LED a session edge to latch
  * on instead of raw traffic: a debugger sitting on a halted target sends
  * nothing at all for minutes and the blue state still has to stay on.
+ *
+ * A wired bridge sees its DAP traffic on the USB vendor interface and feeds the
+ * same helper from the local probe branch below, so every role reports its SWD
+ * session the same way.
  */
 #define BRIDGE_DAP_ID_CONNECT    0x02u
 #define BRIDGE_DAP_ID_DISCONNECT 0x03u
 
-static void bridge_dap_track_session(const uint8_t *data, size_t len) {
+static void bridge_dap_track_session(const uint8_t *data, size_t len)
+{
     if (len == 0) {
         return;
     }
@@ -183,6 +186,8 @@ static void bridge_dap_track_session(const uint8_t *data, size_t len) {
         status_led_notify_swd_session(false);
     }
 }
+
+#if !CONFIG_BRIDGE_ROLE_WIRED
 
 /* ------------------------------------------------------------------- slave side */
 
@@ -865,12 +870,26 @@ esp_err_t bridge_probe_init(void)
 
 esp_err_t bridge_probe_process_data(const uint8_t *data, size_t len)
 {
+    /*
+     * A wired bridge reaches its DAP engine through the USB vendor interface, so
+     * this branch is where its SWD traffic and session edges show up. The wireless
+     * slave already notifies from the link receive path; repeating it here is
+     * harmless and keeps the wired role on the same code.
+     */
+    status_led_notify_activity(STATUS_LED_ACT_SWD);
+    bridge_dap_track_session(data, len);
     return debug_probe_process_data(data, len);
 }
 
 uint8_t *bridge_probe_get_data_to_send(size_t *len, TickType_t timeout)
 {
-    return debug_probe_get_data_to_send(len, timeout);
+    uint8_t *data = debug_probe_get_data_to_send(len, timeout);
+
+    if (data != NULL) {
+        status_led_notify_activity(STATUS_LED_ACT_SWD);
+    }
+
+    return data;
 }
 
 void bridge_probe_free_sent_data(uint8_t *data)
