@@ -6,6 +6,10 @@
 
 #pragma once
 
+/*
+ * Phase 4 (B2): the internal USB PHY bring-up moves to components/usb_device.
+ */
+
 #include "esp_err.h"
 
 #ifdef __cplusplus

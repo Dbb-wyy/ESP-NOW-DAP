@@ -6,6 +6,10 @@
 
 #pragma once
 
+/*
+ * Phase 4 (B2): the vendor interface and its MS OS 2.0 descriptors moves to components/usb_device.
+ */
+
 #include <stddef.h>
 
 #define EUB_VENDORD_EPSIZE          64 /* full speed */

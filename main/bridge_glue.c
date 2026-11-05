@@ -19,6 +19,7 @@
 #include "freertos/semphr.h"
 
 #include "bridge_glue.h"
+#include "debug_probe.h"
 #include "serial_bridge.h"
 #include "serial_handler.h"
 #include "status_led.h"
@@ -76,7 +77,6 @@ static const char *TAG = "bridge_glue";
 #if BRIDGE_LOCAL_TARGET
 
 static esp_timer_handle_t s_state_change_timer;
-static bool s_tdi_bootstrapping;
 
 static void bridge_state_change_timer_cb(void *arg)
 {

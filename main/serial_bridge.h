@@ -6,6 +6,10 @@
 
 #pragma once
 
+/*
+ * Phase 4 (B2): the CDC to target-serial bridge moves to components/usb_device.
+ */
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>

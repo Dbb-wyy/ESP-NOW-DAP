@@ -6,6 +6,10 @@
 
 # pragma once
 
+/*
+ * Phase 4 (B2): the tinyusb configuration moves to components/usb_device.
+ */
+
 #include "sdkconfig.h"
 
 #ifdef __cplusplus

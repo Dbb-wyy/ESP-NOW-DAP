@@ -22,6 +22,9 @@
  *   WIRED         local UART           local debug_probe (JTAG or CMSIS-DAP)
  *   WIRELESS_HOST USB  -> ESP-NOW      USB bulk -> ESP-NOW relay
  *   WIRELESS_SLAVE ESP-NOW -> UART     ESP-NOW -> local CMSIS-DAP engine
+ *
+ * Phase 5 (B3): this role glue moves to components/bridge, so this header
+ * becomes that component's private header instead of a main/ header.
  */
 
 #include <stdint.h>
@@ -29,7 +32,6 @@
 #include <stddef.h>
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
-#include "debug_probe.h"
 
 #ifdef __cplusplus
 extern "C" {

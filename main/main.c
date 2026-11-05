@@ -18,6 +18,7 @@
 #if !CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE
 /* USB device stack headers: only the wired and wireless-host builds use them. */
 #include "tusb.h"
+#include "debug_probe.h"
 #include "serial_bridge.h"
 #include "esp_mac.h"
 #include "eub_vendord.h"
