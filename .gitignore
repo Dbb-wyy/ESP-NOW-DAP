@@ -36,3 +36,8 @@ build_r_*.log
 .agent/
 
 # docs/ is tracked. test/ and CHANGELOG.md were removed from the tree.
+
+# Python bytecode (helper scripts under .dsh/skills)
+__pycache__/
+*.pyc
+

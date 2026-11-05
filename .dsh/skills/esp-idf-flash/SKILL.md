@@ -15,7 +15,7 @@ whenToUse: 用户要求烧录、上板验证或抓启动日志时。
 - 探测串口（`/dev/serial/by-id`、`esptool --port ... flash-id`）
 - 读取构建产物与配置（`build_r_*/config/sdkconfig.json`、`flash_args`）
 - `idf.py ... flash`
-- 抓串口日志（pyserial 读 12 秒；或用户在场时 `idf.py monitor`）
+- 抓串口日志（本技能 `capture_boot.py`；或用户在场时 `idf.py monitor`）
 
 禁止：
 
@@ -105,34 +105,23 @@ idf.py -B build_r_$V -D SDKCONFIG=sdkconfig.r_$V -D SDKCONFIG_DEFAULTS="$D" -p <
 
 ## 6. 抓启动日志（烧录成功后立即做）
 
-优先用 pyserial（非交互、可脚本化）：
+用技能自带的 `capture_boot.py`：**先打开串口、再用 DTR/RTS 发一次复位**，从第一行 ROM 日志开始抓。直接开端口读会踩 `idf.py flash` 结束到端口打开之间的竞态（实测 0 字节或半行截断）。
 
 ```bash
 source ~/.espressif/tools/activate_idf_v6.0.2.sh
-python3 - <<'EOF'
-import serial, time
-port = "<PORT>"
-s = serial.Serial(port, 115200, timeout=0.5)
-t0 = time.time(); out = []
-while time.time() - t0 < 12:
-    d = s.read(4096)
-    if d:
-        out.append(d)
-s.close()
-print(b"".join(out).decode("utf-8", "replace"))
-EOF
+python3 .dsh/skills/esp-idf-flash/capture_boot.py <PORT> build_r_<v>/boot_skill.log 12
 ```
 
-**兜底（实测偶发）**：若 12 秒读到 0 字节，先别判失败，做一次显式复位再读一次：
+脚本行为：115200 8N1 打开端口 → DTR 拉低（GPIO0 高，正常启动，不进 ROM 下载模式）→ RTS 脉冲 EN 复位 → 连续读 12 秒；2.5 秒内无数据会自动补一次复位脉冲（最多 3 次）。
 
-```bash
-esptool --port <PORT> --after hard-reset chip-id
-# 然后重跑上面的读取脚本（只重试一次）
-```
+输出与判读：
 
-实测中 `idf.py flash` 结束后的自动复位可能没有让应用真正启动（端口 12–20 秒无输出），
-显式复位后日志立即出现；第二次烧录同一固件后直接读就正常 —— 属偶发，不是烧录失败。
-仍无输出 → 按 §7 报告，不重复复位。
+- `captured N bytes in Xs (K reset pulse(s)) -> <path>`：字节数；
+- `signature hits: ...`：命中的启动判据（`Free heap after start-up:` / host 角色行 / slave 角色行），`none` 表示没抓到应用日志。
+- `captured 0 bytes` 或 `signature hits: none` → **重跑一次**（脚本自己会再复位；最多两次）；仍不行按 §7 报告，不再重复。
+- 只抓到部分行（字节数 >0、signature 缺失）→ 多半是板子已经跑起来、早期行丢了；重跑一次即可从第一行开始。
+
+手动兜底（脚本不可用时）：`esptool --port <PORT> --after hard-reset chip-id` 后立刻重开端口读取（旧兜底，成功率低于脚本）。
 
 备选（用户在场、需要交互）：`idf.py -B build_r_<v> -p <PORT> monitor`（退出 `Ctrl+]`）。
 
