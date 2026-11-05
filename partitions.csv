@@ -1,0 +1,7 @@
+# Partition table for END_nightly: the factory app occupies the whole 4 MB flash
+# (offset 0x10000 .. 0x400000) on every supported target (S3 / C6 / C3).
+# Offsets are left blank so they are derived from CONFIG_PARTITION_TABLE_OFFSET.
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     ,         0x6000,
+phy_init, data, phy,     ,         0x1000,
+factory,  app,  factory, ,         0x3F0000,

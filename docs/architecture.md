@@ -186,7 +186,7 @@ stub file exists. Only `wireless_slave` builds are supported there; `bridge` onl
 | `slave_c6` | esp32c6 | `sdkconfig.defaults;sdkconfig.defaults.wireless_slave` | no | slave on C6 |
 | `slave_c3` | esp32c3 | `sdkconfig.defaults;sdkconfig.defaults.wireless_slave` | no | slave on C3 |
 
-All five produce `bridge.bin`; commands and success criteria are in the `esp-idf-build` skill.
+All five produce `bridge.bin`; commands and success criteria are in the `esp-idf-build` skill. All variants share the project-root `partitions.csv`: `nvs` 24K, `phy_init` 4K and a factory app of 4032K (`0x10000`–`0x400000`), i.e. the app partition uses the whole 4 MB flash.
 
 ## 6. Invariants
 

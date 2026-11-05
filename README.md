@@ -65,6 +65,8 @@ idf.py -B build_wired -D SDKCONFIG=sdkconfig.wired \
 
 芯片相关的默认值（引脚、Flash 容量、USB 标识、状态灯）在 `sdkconfig.defaults.esp32s3` / `sdkconfig.defaults.esp32c6` / `sdkconfig.defaults.esp32c3` 里，IDF 会按 `set-target` 自动追加，不需要写进 `SDKCONFIG_DEFAULTS`。
 
+所有组合共用根目录的 `partitions.csv`：`nvs` 24K、`phy_init` 4K，其余全部给 factory app（4032K，`0x10000`–`0x400000`），即 app 分区用满 4MB Flash。
+
 两个无线角色都要求使用 CMSIS-DAP SWD 调试接口；角色默认配置文件已经选好，若缺少该配置，编译会以明确的错误停止。
 
 ### 五种构建组合与验证状态
@@ -308,6 +310,8 @@ idf.py -B build_wired -D SDKCONFIG=sdkconfig.wired \
 ```
 
 Chip-specific defaults (pins, flash size, USB identifiers, status LED) live in `sdkconfig.defaults.esp32s3` / `sdkconfig.defaults.esp32c6` / `sdkconfig.defaults.esp32c3`; IDF appends the matching file automatically after `set-target`, so it does not need to be listed in `SDKCONFIG_DEFAULTS`.
+
+All combinations share the project-root `partitions.csv`: `nvs` 24K, `phy_init` 4K and the rest goes to the factory app (4032K, `0x10000`–`0x400000`), i.e. the app partition uses the whole 4 MB flash.
 
 Both wireless roles require the CMSIS-DAP SWD debug interface; the role default files select it, and the build stops with an explicit error if it is missing.
 

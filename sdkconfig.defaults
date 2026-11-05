@@ -1,1 +1,6 @@
 CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=n
+
+# Custom partition table: the app partition uses the whole 4 MB flash instead of
+# the 1 MB "single factory app" default (see partitions.csv).
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
