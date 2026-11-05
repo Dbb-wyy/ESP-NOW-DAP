@@ -633,7 +633,7 @@ esp_err_t bridge_uplink_init(void)
         return err;
     }
 
-    err = serial_handler_init(TRANSPORT_TYPE_UART);
+    err = serial_handler_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "UART transport init failed: %s", esp_err_to_name(err));
         return err;
@@ -698,7 +698,7 @@ esp_err_t bridge_uplink_init(void)
         return err;
     }
 
-    err = serial_handler_init(TRANSPORT_TYPE_UART);
+    err = serial_handler_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "UART transport init failed: %s", esp_err_to_name(err));
         return err;

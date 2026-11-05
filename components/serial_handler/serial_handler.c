@@ -23,6 +23,8 @@
 
 #define KB(x) ((x) * 1024)
 
+#define SERIAL_HANDLER_TASK_PRI 5
+
 #define SLAVE_UART_NUM          UART_NUM_1
 #define SLAVE_UART_BUF_SIZE     KB(2)
 #define SLAVE_UART_DEFAULT_BAUD 115200
@@ -35,7 +37,6 @@ static const char *TAG = "serial_handler";
 
 // Transport state
 typedef struct {
-    transport_type_t type;
     bool is_initialized;
 
     // UART specific
@@ -149,29 +150,19 @@ static esp_err_t init_uart_transport(void)
     return ESP_OK;
 }
 
-esp_err_t serial_handler_init(transport_type_t type)
+esp_err_t serial_handler_init(void)
 {
     if (s_transport.is_initialized) {
         ESP_LOGW(TAG, "Comm handler already initialized");
         return ESP_OK;
     }
 
-    s_transport.type = type;
     s_transport.data_callback = NULL;
 
-    esp_err_t ret = ESP_ERR_NOT_SUPPORTED;
-    switch (type) {
-    case TRANSPORT_TYPE_UART:
-        ret = init_uart_transport();
-        break;
-    default:
-        ESP_LOGE(TAG, "Unknown transport type: %d", type);
-        break;
-    }
-
+    const esp_err_t ret = init_uart_transport();
     if (ret == ESP_OK) {
         s_transport.is_initialized = true;
-        ESP_LOGI(TAG, "Comm handler initialized for type %d", type);
+        ESP_LOGI(TAG, "Comm handler initialized");
     }
 
     return ret;
@@ -199,18 +190,10 @@ esp_err_t serial_handler_send_data(const uint8_t *data, size_t len)
     ESP_LOGD(TAG, "Sending %zu bytes", len);
     ESP_LOG_BUFFER_HEXDUMP("UART TX", data, len, ESP_LOG_DEBUG);
 
-    switch (s_transport.type) {
-    case TRANSPORT_TYPE_UART: {
-        const int transferred = uart_write_bytes(SLAVE_UART_NUM, data, len);
-        if (transferred != len) {
-            ESP_LOGW(TAG, "uart_write_bytes transferred %d bytes only!", transferred);
-            return ESP_ERR_INVALID_SIZE;
-        }
-        break;
-    }
-    default:
-        ESP_LOGE(TAG, "Unknown transport type: %d", s_transport.type);
-        return ESP_ERR_INVALID_ARG;
+    const int transferred = uart_write_bytes(SLAVE_UART_NUM, data, len);
+    if (transferred != len) {
+        ESP_LOGW(TAG, "uart_write_bytes transferred %d bytes only!", transferred);
+        return ESP_ERR_INVALID_SIZE;
     }
 
     return ESP_OK;
@@ -223,19 +206,13 @@ esp_err_t serial_handler_set_baudrate(uint32_t baud)
         return ESP_ERR_INVALID_STATE;
     }
 
-    switch (s_transport.type) {
-    case TRANSPORT_TYPE_UART: {
-        esp_err_t result = uart_set_baudrate(SLAVE_UART_NUM, baud);
-        if (result == ESP_OK) {
-            ESP_LOGI(TAG, "UART baudrate set to %" PRIu32, baud);
-        } else {
-            ESP_LOGE(TAG, "Failed to set UART baudrate to %" PRIu32, baud);
-        }
-        return result;
+    const esp_err_t result = uart_set_baudrate(SLAVE_UART_NUM, baud);
+    if (result == ESP_OK) {
+        ESP_LOGI(TAG, "UART baudrate set to %" PRIu32, baud);
+    } else {
+        ESP_LOGE(TAG, "Failed to set UART baudrate to %" PRIu32, baud);
     }
-    default:
-        return ESP_ERR_NOT_SUPPORTED;
-    }
+    return result;
 }
 
 void serial_handler_set_boot_reset_pins(bool boot_pin, bool reset_pin)

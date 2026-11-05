@@ -25,6 +25,9 @@
 #include "soc/rtc_cntl_reg.h"
 
 #define USB_SEND_RINGBUFFER_SIZE (2 * 1024)
+/* Same numeric priority as the UART event task of serial_handler: the sender and
+ * the UART consumer advance the same byte stream, they must not preempt each other. */
+#define USB_SENDER_TASK_PRI 5
 /* tud_cdc_n_get_line_state(): bit 0 = DTR, bit 1 = RTS */
 #define CDC_LINE_STATE_DTR (1u << 0)
 
@@ -215,7 +218,7 @@ esp_err_t serial_bridge_init(void)
     // The transport that feeds this bridge is registered by bridge_uplink_init().
 
     // Start USB sender task
-    xTaskCreate(usb_sender_task, "usb_sender_task", 4 * 1024, NULL, SERIAL_HANDLER_TASK_PRI, NULL);
+    xTaskCreate(usb_sender_task, "usb_sender_task", 4 * 1024, NULL, USB_SENDER_TASK_PRI, NULL);
 
     ESP_LOGI(TAG, "Serial bridge initialized");
     return ESP_OK;

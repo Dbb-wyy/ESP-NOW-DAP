@@ -14,23 +14,8 @@
 extern "C" {
 #endif
 
-#define SERIAL_HANDLER_TASK_PRI 5
-
-#define DOWNLOAD_MODE  1
-#define RUNNING_MODE   0
-#define RESET_ASSERT   1
-#define RESET_RELEASE  0
-
-typedef enum {
-    TRANSPORT_TYPE_UART,
-    // Future transport types...
-} transport_type_t;
-
 /**
- * @brief Data received callback - called when data is received from transport
- *
- * NOTE: This callback is only invoked when flashing is NOT in progress.
- * When flashing is active, all received data is used internally for ESP loader operations.
+ * @brief Data received callback - called when data arrives from the target UART.
  *
  * @param data Received data buffer
  * @param len Length of received data
@@ -40,28 +25,20 @@ typedef void (*transport_data_received_cb_t)(const uint8_t *data, size_t len);
 /**
  * @brief Register callback for received data
  *
- * The callback will be invoked when data is received, but ONLY when
- * flashing is not in progress. During flashing operations, all data
- * is handled internally by the ESP loader.
- *
  * @param callback Callback function to call when data is received
  * @return esp_err_t ESP_OK on success
  */
 esp_err_t serial_handler_register_data_callback(transport_data_received_cb_t callback);
 
 /**
- * @brief Initialize comm handler with specified transport type
+ * @brief Initialize the serial comm handler (UART to the target).
  *
- * @param type Transport type to initialize (UART, SPI, I2C, etc.)
  * @return esp_err_t ESP_OK on success
  */
-esp_err_t serial_handler_init(transport_type_t type);
+esp_err_t serial_handler_init(void);
 
 /**
- * @brief Send data through transport
- *
- * Can be used for bridge operations when flashing is not active,
- * or for ESP loader operations when flashing is active.
+ * @brief Send data to the target UART.
  *
  * @param data Data to send
  * @param len Length of data
@@ -70,9 +47,9 @@ esp_err_t serial_handler_init(transport_type_t type);
 esp_err_t serial_handler_send_data(const uint8_t *data, size_t len);
 
 /**
- * @brief Set transport baudrate/speed
+ * @brief Set the target UART baudrate.
  *
- * @param baud Baudrate for UART, clock speed for SPI, etc.
+ * @param baud New baudrate
  * @return esp_err_t ESP_OK on success
  */
 esp_err_t serial_handler_set_baudrate(uint32_t baud);
