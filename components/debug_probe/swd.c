@@ -13,6 +13,7 @@
 #include "freertos/ringbuf.h"
 #include "esp_log.h"
 #include "debug_probe.h"
+#include "debug_probe_priv.h"
 #include "DAP_config.h"
 #include "DAP.h"
 
@@ -31,7 +32,9 @@ int debug_probe_get_proto_caps(void *dest) __attribute__((alias("swd_get_proto_c
 void debug_probe_handle_esp32_tdi_bootstrapping(bool rebooting) __attribute__((alias("swd_handle_esp32_tdi_bootstrapping")));
 uint8_t *debug_probe_get_data_to_send(size_t *len, TickType_t timeout) __attribute__((alias("swd_get_data_to_send")));
 void debug_probe_free_sent_data(uint8_t *data) __attribute__((alias("swd_free_sent_data")));
-debug_probe_cmd_response_t debug_probe_handle_command(uint8_t cmd, uint16_t wValue) __attribute__((alias("swd_handle_command")));
+esp_err_t debug_probe_handle_command(uint8_t cmd, uint16_t wValue,
+                                     const uint8_t **out_data, size_t *out_len)
+    __attribute__((alias("swd_handle_command")));
 
 static int swd_get_proto_caps(void *dest)
 {
@@ -80,12 +83,21 @@ static esp_err_t swd_send_data(const void *buf, const size_t size)
     return ESP_OK;
 }
 
-debug_probe_cmd_response_t swd_handle_command(uint8_t cmd, uint16_t wValue)
+esp_err_t swd_handle_command(uint8_t cmd, uint16_t wValue,
+                             const uint8_t **out_data, size_t *out_len)
 {
     // Function to handle the TUSB_REQ_TYPE_VENDOR control requests from the host,
     // called by the tusb_control_xfer_cb function in eub_vendord.c.
-    debug_probe_cmd_response_t response = {0};
-    return response;
+    // The SWD backend exposes no vendor control commands.
+    (void)cmd;
+    (void)wValue;
+    if (out_data != NULL) {
+        *out_data = NULL;
+    }
+    if (out_len != NULL) {
+        *out_len = 0;
+    }
+    return ESP_ERR_NOT_SUPPORTED;
 }
 
 static void swd_task(void *pvParameters)

@@ -20,6 +20,8 @@
 
 static const char *TAG = "eub_vendor";
 #define USB_BUSY_TOUT_US    100000 /* 100ms */
+/* One level below the probe worker task (priority 5). */
+#define EUB_VENDORD_TASK_PRI 4
 
 typedef struct {
     uint8_t ep_in;
@@ -147,18 +149,19 @@ bool tud_vendor_control_xfer_cb(const uint8_t rhport, const uint8_t stage, tusb_
         case VENDOR_REQUEST_MICROSOFT:
             return tud_control_xfer(rhport, request, (void *)(uintptr_t)desc_ms_os_20, MS_OS_20_DESC_LEN);
         default:
-            debug_probe_cmd_response_t response = bridge_probe_handle_command(
-                    request->bRequest,
-                    request->wValue
-                                                  );
-
-            if (!response.success) {
+            const uint8_t *response_data = NULL;
+            size_t response_len = 0;
+            esp_err_t err = bridge_probe_handle_command(request->bRequest,
+                                                        request->wValue,
+                                                        &response_data,
+                                                        &response_len);
+            if (err != ESP_OK) {
                 return false;
             }
 
             // Handle USB response
-            if (response.data_len > 0) {
-                return tud_control_xfer(rhport, request, (void *)response.data, response.data_len);
+            if (response_len > 0) {
+                return tud_control_xfer(rhport, request, (void *)response_data, response_len);
             } else {
                 return tud_control_status(rhport, request);
             }
@@ -245,7 +248,7 @@ void eub_vendord_start(void)
                         "usb_send_task",
                         4 * 1024,
                         NULL,
-                        DEBUG_PROBE_TASK_PRI - 1,
+                        EUB_VENDORD_TASK_PRI,
                         &s_eub_vendord_itf.usb_tx_task_handle) != pdPASS) {
             ESP_LOGE(TAG, "Cannot create USB send task!");
             eub_abort();

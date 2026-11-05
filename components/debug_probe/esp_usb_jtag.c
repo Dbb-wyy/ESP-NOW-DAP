@@ -15,6 +15,7 @@
 #include "esp_rom_sys.h"
 #include "esp_chip_info.h"
 #include "debug_probe.h"
+#include "debug_probe_priv.h"
 #include "debug_gpio.h"
 
 static const char *TAG = "esp_usb_jtag";
@@ -86,7 +87,9 @@ int debug_probe_get_proto_caps(void *dest) __attribute__((alias("esp_usb_jtag_ge
 void debug_probe_handle_esp32_tdi_bootstrapping(bool rebooting) __attribute__((alias("esp_usb_jtag_handle_esp32_tdi_bootstrapping")));
 uint8_t *debug_probe_get_data_to_send(size_t *len, TickType_t timeout) __attribute__((alias("esp_usb_jtag_get_data_to_send")));
 void debug_probe_free_sent_data(uint8_t *data) __attribute__((alias("esp_usb_jtag_free_sent_data")));
-debug_probe_cmd_response_t debug_probe_handle_command(uint8_t cmd, uint16_t wValue) __attribute__((alias("esp_usb_jtag_handle_command")));
+esp_err_t debug_probe_handle_command(uint8_t cmd, uint16_t wValue,
+                                     const uint8_t **out_data, size_t *out_len)
+    __attribute__((alias("esp_usb_jtag_handle_command")));
 
 static int esp_usb_jtag_get_proto_caps(void *dest)
 {
@@ -177,36 +180,41 @@ static esp_err_t esp_usb_jtag_send_data(const void *buf, const size_t size)
     return ESP_OK;
 }
 
-debug_probe_cmd_response_t esp_usb_jtag_handle_command(uint8_t cmd, uint16_t wValue)
+esp_err_t esp_usb_jtag_handle_command(uint8_t cmd, uint16_t wValue,
+                                        const uint8_t **out_data, size_t *out_len)
 {
-    debug_probe_cmd_response_t response = {0};
     static uint8_t tdo_buf;
+
+    if (out_data != NULL) {
+        *out_data = NULL;
+    }
+    if (out_len != NULL) {
+        *out_len = 0;
+    }
 
     switch ((eub_jtag_vendor_cmd_t)cmd) {
     case VEND_JTAG_SETDIV:
     case VEND_JTAG_SETIO:
         // TODO: process the commands
-        response.success = true;
-        break;
+        return ESP_OK;
 
     case VEND_JTAG_GETTDO:
         tdo_buf = gpio_get_level(GPIO_TDO);
-        response.success = true;
-        response.data = &tdo_buf;
-        response.data_len = 1;
-        break;
+        if (out_data != NULL) {
+            *out_data = &tdo_buf;
+        }
+        if (out_len != NULL) {
+            *out_len = 1;
+        }
+        return ESP_OK;
 
     case VEND_JTAG_SET_CHIPID:
         s_target_model = wValue;
-        response.success = true;
-        break;
+        return ESP_OK;
 
     default:
-        response.success = false;
-        break;
+        return ESP_ERR_NOT_SUPPORTED;
     }
-
-    return response;
 }
 
 inline static void do_jtag_one(const uint8_t tdo_req, const uint8_t tms_tdi_mask)

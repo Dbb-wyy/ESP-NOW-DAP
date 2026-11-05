@@ -10,6 +10,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <freertos/FreeRTOS.h>
+#include "esp_err.h"
 
 /* Be careful if you want to change the index. It must be bigger then the size of string_desc_arr
    For now 7 would be also ok. But lets reserve some fields for the future additions
@@ -23,14 +24,7 @@
 // 1024 for High-speed USB HID and 512 for High-speed USB WinUSB.
 // In case of SWD, the value needs to be the same as DAP_PACKET_SIZE in DAP_config.h
 #define DEBUG_PROBE_PACKET_SIZE 64
-
-#define DEBUG_PROBE_TASK_PRI        5
-
-typedef struct {
-    bool success;
-    uint8_t *data;
-    size_t data_len;
-} debug_probe_cmd_response_t;
+_Static_assert(DEBUG_PROBE_PACKET_SIZE == 64, "must match the USB bulk endpoint size");
 
 /**
  * @brief Initialize the debug probe subsystem
@@ -76,9 +70,13 @@ void debug_probe_handle_esp32_tdi_bootstrapping(bool rebooting);
  *
  * @param cmd Command code to execute
  * @param wValue Command-specific value parameter
- * @return debug_probe_cmd_response_t Response structure containing success status and optional data
+ * @param[out] out_data  Response payload (static storage owned by the backend,
+ *                       valid until the next command). NULL when there is no data.
+ * @param[out] out_len   Response payload length in bytes.
+ * @return ESP_OK when the command is supported, ESP_ERR_NOT_SUPPORTED otherwise
  */
-debug_probe_cmd_response_t debug_probe_handle_command(uint8_t cmd, uint16_t wValue);
+esp_err_t debug_probe_handle_command(uint8_t cmd, uint16_t wValue,
+                                     const uint8_t **out_data, size_t *out_len);
 
 /**
  * @brief Process incoming debug probe data

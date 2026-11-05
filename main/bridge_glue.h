@@ -84,7 +84,17 @@ esp_err_t bridge_probe_init(void);
 esp_err_t bridge_probe_process_data(const uint8_t *data, size_t len);
 uint8_t *bridge_probe_get_data_to_send(size_t *len, TickType_t timeout);
 void bridge_probe_free_sent_data(uint8_t *data);
-debug_probe_cmd_response_t bridge_probe_handle_command(uint8_t cmd, uint16_t wValue);
+/**
+ * @brief Handle a vendor control command through the probe backend.
+ *
+ * WIRED/SLAVE: forwarded to the local debug_probe backend.
+ * WIRELESS_HOST: always ESP_ERR_NOT_SUPPORTED (the backend lives on the slave).
+ *
+ * @param[out] out_data Response payload owned by the backend (may be NULL).
+ * @param[out] out_len  Response payload length.
+ */
+esp_err_t bridge_probe_handle_command(uint8_t cmd, uint16_t wValue,
+                                      const uint8_t **out_data, size_t *out_len);
 int bridge_probe_get_proto_caps(void *dest);
 void bridge_probe_handle_esp32_tdi_bootstrapping(bool rebooting);
 

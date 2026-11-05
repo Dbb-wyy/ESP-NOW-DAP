@@ -55,6 +55,9 @@ static const char *TAG = "bridge_glue";
 
 /* How often the host relay re-checks the link while it waits for the peer. */
 #define BRIDGE_PEER_POLL_MS 100
+/* Same value as the debug_probe worker task priority; kept local so main does not
+   depend on a private debug_probe constant. */
+#define BRIDGE_TASK_PRI 5
 
 /*
  * Per packet logging on the SWD path. It stays at debug level by default, because a
@@ -460,9 +463,9 @@ esp_err_t bridge_wireless_slave_start(void)
        on the core that debug_probe_init() bound the pins to. */
     BaseType_t core = esp_cpu_get_core_id();
     if (xTaskCreatePinnedToCore(bridge_slave_swd_rx_task, "swd_link_rx", 3 * 1024, NULL,
-                                DEBUG_PROBE_TASK_PRI, NULL, core) != pdPASS ||
+                                BRIDGE_TASK_PRI, NULL, core) != pdPASS ||
         xTaskCreatePinnedToCore(bridge_slave_swd_tx_task, "swd_link_tx", 3 * 1024, NULL,
-                                DEBUG_PROBE_TASK_PRI, NULL, core) != pdPASS) {
+                                BRIDGE_TASK_PRI, NULL, core) != pdPASS) {
         ESP_LOGE(TAG, "Cannot start the SWD link tasks");
         return ESP_ERR_NO_MEM;
     }
@@ -775,7 +778,7 @@ esp_err_t bridge_probe_init(void)
     }
 
     if (xTaskCreate(bridge_host_swd_relay_task, "swd_relay", 3 * 1024, NULL,
-                    DEBUG_PROBE_TASK_PRI, NULL) != pdPASS) {
+                    BRIDGE_TASK_PRI, NULL) != pdPASS) {
         ESP_LOGE(TAG, "Cannot start the SWD relay task");
         return ESP_ERR_NO_MEM;
     }
@@ -823,13 +826,20 @@ void bridge_probe_free_sent_data(uint8_t *data)
     }
 }
 
-debug_probe_cmd_response_t bridge_probe_handle_command(uint8_t cmd, uint16_t wValue)
+esp_err_t bridge_probe_handle_command(uint8_t cmd, uint16_t wValue,
+                                      const uint8_t **out_data, size_t *out_len)
 {
     /* Vendor control requests cannot be served remotely: the CMSIS-DAP bulk backend
        does not use them, and the firmware caps descriptor lives in the device. */
     (void)cmd;
     (void)wValue;
-    return (debug_probe_cmd_response_t) { .success = false };
+    if (out_data != NULL) {
+        *out_data = NULL;
+    }
+    if (out_len != NULL) {
+        *out_len = 0;
+    }
+    return ESP_ERR_NOT_SUPPORTED;
 }
 
 int bridge_probe_get_proto_caps(void *dest)
@@ -865,9 +875,10 @@ void bridge_probe_free_sent_data(uint8_t *data)
     debug_probe_free_sent_data(data);
 }
 
-debug_probe_cmd_response_t bridge_probe_handle_command(uint8_t cmd, uint16_t wValue)
+esp_err_t bridge_probe_handle_command(uint8_t cmd, uint16_t wValue,
+                                      const uint8_t **out_data, size_t *out_len)
 {
-    return debug_probe_handle_command(cmd, wValue);
+    return debug_probe_handle_command(cmd, wValue, out_data, out_len);
 }
 
 int bridge_probe_get_proto_caps(void *dest)
