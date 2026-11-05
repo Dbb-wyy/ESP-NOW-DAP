@@ -141,15 +141,13 @@ menu "END-config"
             config BRIDGE_LED_ENABLE
                 bool "Enable the WS2812 status LED"
                 default y
-                depends on !BRIDGE_ROLE_WIRED
                 help
                     Enables the addressable (WS2812) status LED, which reports the state
-                    of the bridge: breathing cyan while the ESP-NOW link is up, flashing
-                    yellow while it is down, flashing blue for SWD activity, flashing
-                    green for serial activity and flashing violet when both are busy.
-
-                    The wired role is excluded: it has no link to report, and its boards
-                    are not expected to carry such an LED.
+                    of the bridge. In the wireless roles it breathes cyan while the
+                    ESP-NOW link is up and flashes amber while it is down; the wired role
+                    has no link to report and instead breathes white until traffic takes
+                    over. In every role SWD activity flashes blue, serial activity
+                    flashes green and both at once flash violet.
 
                     While disabled there is no LED pin at all: the pin option below is
                     not offered, no pin is configured, driven or reset, and the LED

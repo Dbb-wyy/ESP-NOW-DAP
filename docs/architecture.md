@@ -164,7 +164,10 @@ stub file exists. Only `wireless_slave` builds are supported there; `bridge` onl
 ### 4.5 `status_led`
 
 - `status_led_init()`, `status_led_notify_activity()`, `status_led_notify_swd_session()`,
-  `status_led_set_link_ops()`.
+  `status_led_set_link_ops()`, `status_led_set_local()`.
+- The wireless roles breathe cyan/amber from the pulled link state (blue/green/violet for
+  activity); the wired role declares itself local and breathes white while idle, because it
+  has no link to report. All roles share the activity colours.
 - The header contains no `sdkconfig.h` and no conditional implementation; when the LED is
   disabled the stubs are compiled inside `status_led.c`.
 

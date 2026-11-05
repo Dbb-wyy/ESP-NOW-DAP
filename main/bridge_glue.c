@@ -631,6 +631,9 @@ static const status_led_link_ops_t k_led_link_ops = {
 esp_err_t bridge_uplink_init(void)
 {
 #if CONFIG_BRIDGE_ROLE_WIRED
+    /* No link to report: the LED breathes white while the bridge idles. */
+    status_led_set_local(true);
+
     esp_err_t err = bridge_init_state_change_timer();
     if (err != ESP_OK) {
         return err;

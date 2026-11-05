@@ -61,12 +61,15 @@ static const char *const k_status_name[LED_STATUS_COUNT] = {
     [LED_STATUS_SWD_AND_SERIAL] = "SWD and serial",
     [LED_STATUS_SWD] = "SWD",
     [LED_STATUS_SERIAL] = "serial",
-    [LED_STATUS_IDLE] = "link up, idle",
+    [LED_STATUS_IDLE] = "idle",
 };
 
 static led_strip_handle_t s_strip;
 static int s_pin = -1;
 static const status_led_link_ops_t *s_ops;
+/* A local (wired) bridge has no link to report: it never samples s_ops and its
+   idle state is white instead of cyan/amber. Set once from the wired uplink. */
+static bool s_local;
 /* Set by an edge that has to be seen on the next tick rather than on the next
    poll: closing a debug session must drop the blue colour at once. */
 static volatile bool s_poll_due;
@@ -290,11 +293,15 @@ static void state_swd_and_serial(uint32_t now) {
 static void state_swd(uint32_t now) { led_flash(0, 80, 255, now); /* blue */ }
 
 static void state_serial(uint32_t now) {
-    led_flash(0, 255, 60, now); /* green */
+    led_flash(0, 255, 0, now); /* green */
 }
 
 static void state_idle(uint32_t now) {
     led_breathe(0, 180, 180, now); /* cyan */
+}
+
+static void state_local_idle(uint32_t now) {
+    led_breathe(255, 255, 255, now); /* white */
 }
 
 typedef void (*led_state_fn_t)(uint32_t now);
@@ -315,6 +322,11 @@ static void led_apply_status(led_status_t status, uint32_t now) {
         status = LED_STATUS_LINK_DOWN;
     }
 
+    if (s_local && status == LED_STATUS_IDLE) {
+        state_local_idle(now);
+        return;
+    }
+
     k_draw[status](now);
 }
 
@@ -322,10 +334,12 @@ static void led_apply_status(led_status_t status, uint32_t now) {
  * Answers one question and changes nothing: what state is the bridge in now?
  * The link is pulled, never latched here, so an unregistered source (the few
  * milliseconds between status_led_init() and bridge_uplink_init(), or a failed
- * wlink_init()) reports "down" rather than pretending the link is fine.
+ * wlink_init()) reports "down" rather than pretending the link is fine. A local
+ * (wired) bridge has no link at all and is treated as always linked.
  */
 static led_status_t led_sample_status(uint32_t now) {
-    const bool up = s_ops != NULL && s_ops->link_up != NULL && s_ops->link_up();
+    const bool up =
+        s_local || (s_ops != NULL && s_ops->link_up != NULL && s_ops->link_up());
     const bool swd =
         swd_session_active(now) || activity_recent(STATUS_LED_ACT_SWD, now);
     const bool serial = activity_recent(STATUS_LED_ACT_SERIAL, now);
@@ -459,6 +473,11 @@ esp_err_t status_led_init(void) {
 
 void status_led_set_link_ops(const status_led_link_ops_t *ops) { s_ops = ops; }
 
+void status_led_set_local(bool local) {
+    s_local = local;
+    s_poll_due = true; /* recolour on the next tick, not the next poll */
+}
+
 void status_led_notify_activity(status_led_activity_t act) {
     if ((unsigned)act >= (unsigned)STATUS_LED_ACT_MAX) {
         return;
@@ -493,6 +512,8 @@ void status_led_set_link_ops(const status_led_link_ops_t *ops) {
     /* No pin is claimed and no renderer runs, so there is nothing to feed. */
     (void)ops;
 }
+
+void status_led_set_local(bool local) { (void)local; }
 
 void status_led_notify_activity(status_led_activity_t act) {
     (void)act;

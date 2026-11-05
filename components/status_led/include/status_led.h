@@ -14,14 +14,16 @@
 /*
  * Addressable (WS2812) status LED.
  *
- * The feature is switched on with CONFIG_BRIDGE_LED_ENABLE; with it disabled (which is
- * always the case for the wired role, see the Kconfig dependency) there is no LED pin at
- * all and the implementation in status_led.c compiles to no-op functions that ignore their
- * arguments. A call site therefore never needs an #if.
+ * The feature is switched on with CONFIG_BRIDGE_LED_ENABLE; with it disabled (the
+ * slave_c3 preset turns it off) there is no LED pin at all and the implementation in
+ * status_led.c compiles to no-op functions that ignore their arguments. A call site
+ * therefore never needs an #if.
  *
- * The LED reports the state of the bridge, not the state of the USB device: while the
- * ESP-NOW link is up it breathes cyan, while the link is down it flashes amber, and
- * recent SWD or serial traffic takes over with blue, green or violet.
+ * The LED reports the state of the bridge, not the state of the USB device: in the
+ * wireless roles it breathes cyan while the ESP-NOW link is up, flashes amber while the
+ * link is down, and recent SWD or serial traffic takes over with blue, green or violet.
+ * The wired role declares itself local with status_led_set_local(true): it has no link to
+ * report, so it breathes white until SWD or serial traffic takes over.
  *
  * The blue "SWD in use" state is a session, not traffic: it is opened by the CMSIS-DAP
  * Connect command and closed by Disconnect, so a debugger sitting on a halted target -
@@ -83,6 +85,15 @@ esp_err_t status_led_init(void);
  *        the LED; every current caller passes a static const structure.
  */
 void status_led_set_link_ops(const status_led_link_ops_t *ops);
+
+/**
+ * @brief Declare whether the bridge is a local (wired) bridge without a link to report.
+ *
+ * A local bridge never samples the link source and its idle state breathes white
+ * instead of the wireless cyan/amber pair. Call it once from the wired uplink
+ * initialisation; the wireless roles keep the default (false).
+ */
+void status_led_set_local(bool local);
 
 /**
  * @brief Stamp one activity event. Cheap, lock free and safe from any task, including
