@@ -18,82 +18,75 @@ extern "C" {
 /**
  * ESP-NOW link used by the wireless bridge modes.
  *
- * The link is deliberately tiny: a 4 byte header, a role based peer discovery and a
- * per-message-type dispatch table. Two devices form a pair when they run the opposite
- * roles. Both keep sending a short broadcast beacon forever, so that either side can
- * rediscover the other after a reset; once the peer MAC is known, payload traffic
- * switches to unicast, which gives hardware ACK/retransmission from ESP-NOW itself.
+ * Callers only see logical channels: the frame header, message type bytes, payload
+ * limits and beacon period are private to the component. Two devices form a pair when
+ * they run opposite link identities; both keep sending a short broadcast beacon
+ * forever, so either side can rediscover the other after a reset. Once the peer MAC is
+ * known, payload traffic switches to unicast, which gives hardware ACK/retransmission
+ * from ESP-NOW itself.
  */
 
-/** Maximum ESP-NOW v1 payload minus our header. */
-#define WLINK_MAX_PAYLOAD   (250 - 4)
-
-/** Size of the fixed link header prepended to every message. */
-#define WLINK_HDR_LEN       4
-
-/** Beacon period. Beacons are sent for the lifetime of the link, see above. */
-#define WLINK_BEACON_INTERVAL_MS 1000
-
+/**
+ * Link identity carried on the wire.
+ *
+ * This is *not* the compile-time bridge role: the bridge decides which identity this
+ * device assumes and passes it to wlink_init(). The identity travels in every beacon
+ * and unicast frame, so two devices only pair when their identities are opposite.
+ */
 typedef enum {
     WLINK_ROLE_NONE = 0,
     WLINK_ROLE_HOST,        /*!< USB side: talks to the host PC */
     WLINK_ROLE_SLAVE,       /*!< Target side: drives UART and SWD pins */
 } wlink_role_t;
 
+/** Logical channels carried by the link. */
 typedef enum {
-    WLINK_MSG_BEACON = 0,   /*!< peer discovery, no payload */
-    WLINK_MSG_SERIAL,       /*!< raw serial bytes between PC and target */
-    WLINK_MSG_SERIAL_CMD,   /*!< tunneled CDC line coding / line state */
-    WLINK_MSG_SWD,          /*!< CMSIS-DAP request / response bytes */
-    WLINK_MSG_MAX,
-} wlink_msg_type_t;
+    WLINK_CHANNEL_SERIAL = 0,   /*!< raw serial bytes between PC and target */
+    WLINK_CHANNEL_SERIAL_CMD,   /*!< tunneled CDC line coding / line state */
+    WLINK_CHANNEL_SWD,          /*!< CMSIS-DAP request / response bytes */
+} wlink_channel_t;
 
-typedef enum {
-    WLINK_SERCMD_LINE_CODING = 0,   /*!< payload: uint32_t baud, little endian */
-    WLINK_SERCMD_LINE_STATE  = 1,   /*!< payload: {dtr, rts} */
-} wlink_sercmd_t;
-
-/** Fixed header that precedes every link message. */
-typedef struct __attribute__((packed)) {
-    uint8_t type;   /*!< wlink_msg_type_t */
-    uint8_t role;   /*!< wlink_role_t of the sender, used to pair opposite roles only */
-    uint8_t seq;    /*!< per-type sequence number, used to match SWD responses */
-    uint8_t sub;    /*!< wlink_sercmd_t for WLINK_MSG_SERIAL_CMD, 0 otherwise */
-} wlink_hdr_t;
-
-/** Receive handler. Runs in the Wi-Fi task context: it must not block. */
-typedef void (*wlink_rx_cb_t)(const wlink_hdr_t *hdr, const uint8_t *payload, size_t len);
+/**
+ * Receive handler. Runs in the Wi-Fi task context: it must not block.
+ *
+ * @param channel Channel the frame arrived on.
+ * @param sub     Sub type, only meaningful for WLINK_CHANNEL_SERIAL_CMD.
+ * @param seq     Sequence number, only meaningful for WLINK_CHANNEL_SWD.
+ * @param payload Payload bytes.
+ * @param len     Payload length.
+ */
+typedef void (*wlink_rx_cb_t)(wlink_channel_t channel, uint8_t sub, uint8_t seq,
+                              const uint8_t *payload, size_t len);
 
 /**
  * @brief Initialise Wi-Fi (station, no power save) and ESP-NOW, then start beaconing.
  *
- * @param role Role this device plays on the link.
+ * @param role Link identity this device plays.
  * @return ESP_OK on success.
  */
 esp_err_t wlink_init(wlink_role_t role);
 
 /**
- * @brief Register the handler for one message type.
+ * @brief Register the handler for one channel.
  */
-esp_err_t wlink_register_rx(wlink_msg_type_t type, wlink_rx_cb_t cb);
+esp_err_t wlink_register_rx(wlink_channel_t channel, wlink_rx_cb_t cb);
 
 /**
- * @brief Send a message to the peer.
+ * @brief Send a message on a channel.
  *
- * Payloads larger than WLINK_MAX_PAYLOAD are split into several frames.
- * When the peer has not been discovered yet the frame is broadcast.
+ * Payloads larger than the link frame limit are split into several frames.
+ * When the peer has not been discovered yet the frames are broadcast.
  *
- * @param type    Message type, must not be WLINK_MSG_BEACON.
- * @param sub     Sub type, only meaningful for WLINK_MSG_SERIAL_CMD.
- * @param seq     Sequence number, only meaningful for WLINK_MSG_SWD.
+ * @param channel Destination channel.
+ * @param sub     Sub type, only meaningful for WLINK_CHANNEL_SERIAL_CMD.
+ * @param seq     Sequence number, only meaningful for WLINK_CHANNEL_SWD.
  * @param payload Payload, may be NULL when len is 0.
  * @param len     Payload length.
- * @return ESP_OK on success, ESP_ERR_INVALID_STATE when no peer is known yet and the
- *         frame was dropped.
+ * @return ESP_OK on success, otherwise the first ESP-NOW error encountered.
  */
-esp_err_t wlink_send(wlink_msg_type_t type, uint8_t sub, uint8_t seq, const void *payload, size_t len);
+esp_err_t wlink_send(wlink_channel_t channel, uint8_t sub, uint8_t seq, const void *payload, size_t len);
 
-/** @brief true once the opposite role has been discovered. */
+/** @brief true once the opposite identity has been discovered. */
 bool wlink_peer_ready(void);
 
 /**
@@ -109,11 +102,8 @@ bool wlink_peer_ready(void);
  */
 bool wlink_link_up(void);
 
-/** @brief Get the next sequence number for a message type. */
+/** @brief Get the next sequence number for SWD requests. */
 uint8_t wlink_next_seq(void);
-
-/** @brief Human readable name of a message type, for logging. */
-const char *wlink_msg_type_str(wlink_msg_type_t type);
 
 #ifdef __cplusplus
 }

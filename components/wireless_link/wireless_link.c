@@ -22,13 +22,17 @@
 #include "freertos/task.h"
 
 #include "wireless_link.h"
+#include "wireless_link_priv.h"
 
 static const char *TAG = "wlink";
+
+/* Human readable message type for internal logs only: the type enum is private. */
+static const char *wlink_msg_type_str(wlink_msg_type_t type);
 
 static const uint8_t s_broadcast_mac[ESP_NOW_ETH_ALEN] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
 static wlink_role_t s_role = WLINK_ROLE_NONE;
-static wlink_rx_cb_t s_rx_cb[WLINK_MSG_MAX];
+static wlink_rx_cb_t s_rx_cb[WLINK_CHANNEL_COUNT];
 static SemaphoreHandle_t s_tx_mutex;
 
 static uint8_t s_peer_mac[ESP_NOW_ETH_ALEN];
@@ -131,9 +135,14 @@ static void wlink_recv_cb(const esp_now_recv_info_t *info, const uint8_t *data, 
         return;
     }
 
-    wlink_rx_cb_t cb = s_rx_cb[hdr->type];
+    const wlink_channel_t channel = WLINK_CHANNEL_FROM_MSG(hdr->type);
+    if ((unsigned)channel >= WLINK_CHANNEL_COUNT) {
+        return;
+    }
+
+    wlink_rx_cb_t cb = s_rx_cb[channel];
     if (cb) {
-        cb(hdr, data + WLINK_HDR_LEN, (size_t)(len - WLINK_HDR_LEN));
+        cb(channel, hdr->sub, hdr->seq, data + WLINK_HDR_LEN, (size_t)(len - WLINK_HDR_LEN));
     }
 }
 
@@ -213,23 +222,25 @@ esp_err_t wlink_init(wlink_role_t role)
     return ESP_OK;
 }
 
-esp_err_t wlink_register_rx(wlink_msg_type_t type, wlink_rx_cb_t cb)
+esp_err_t wlink_register_rx(wlink_channel_t channel, wlink_rx_cb_t cb)
 {
-    if (type >= WLINK_MSG_MAX) {
+    if ((unsigned)channel >= WLINK_CHANNEL_COUNT) {
         return ESP_ERR_INVALID_ARG;
     }
-    s_rx_cb[type] = cb;
+    s_rx_cb[channel] = cb;
     return ESP_OK;
 }
 
-esp_err_t wlink_send(wlink_msg_type_t type, uint8_t sub, uint8_t seq, const void *payload, size_t len)
+esp_err_t wlink_send(wlink_channel_t channel, uint8_t sub, uint8_t seq, const void *payload, size_t len)
 {
-    if (s_role == WLINK_ROLE_NONE || type >= WLINK_MSG_MAX || type == WLINK_MSG_BEACON) {
+    if (s_role == WLINK_ROLE_NONE || (unsigned)channel >= WLINK_CHANNEL_COUNT) {
         return ESP_ERR_INVALID_ARG;
     }
     if (len > 0 && payload == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
+
+    const wlink_msg_type_t type = (wlink_msg_type_t)WLINK_MSG_FROM_CHANNEL(channel);
 
     const uint8_t *src = (const uint8_t *)payload;
     size_t offset = 0;
@@ -278,7 +289,7 @@ esp_err_t wlink_send(wlink_msg_type_t type, uint8_t sub, uint8_t seq, const void
  * Diagnosing the bridge over ESP-NOW is awkward, because neither board's console shows
  * what the other one sees. With CONFIG_WLINK_DEBUG_LINK_TEST the slave therefore sends a
  * tiny "connected N" line once per second once it has discovered its peer. The line
- * travels as WLINK_MSG_SERIAL, so it follows exactly the same path as the tunnelled UART
+ * travels on WLINK_CHANNEL_SERIAL, so it follows exactly the same path as the tunnelled UART
  * data and shows up on the serial port of the USB side: that makes it an end to end
  * check of the link, not just of the radio. The value of N counts the lines sent since
  * start-up and never resets.
@@ -287,8 +298,6 @@ esp_err_t wlink_send(wlink_msg_type_t type, uint8_t sub, uint8_t seq, const void
  * the transmit mutex and esp_timer callbacks must never block.
  */
 #define WLINK_DEBUG_PERIOD_MS 1000
-
-#if !CONFIG_BRIDGE_ROLE_WIRELESS_HOST
 
 static void wlink_debug_task(void *arg)
 {
@@ -311,7 +320,7 @@ static void wlink_debug_task(void *arg)
             len = (int)sizeof(msg) - 1;
         }
 
-        esp_err_t err = wlink_send(WLINK_MSG_SERIAL, 0, 0, msg, (size_t)len);
+        esp_err_t err = wlink_send(WLINK_CHANNEL_SERIAL, 0, 0, msg, (size_t)len);
         if (err == ESP_OK) {
             ESP_LOGI(TAG, "Link test: connected %d", counter);
         } else {
@@ -320,16 +329,15 @@ static void wlink_debug_task(void *arg)
     }
 }
 
-#endif /* !CONFIG_BRIDGE_ROLE_WIRELESS_HOST */
-
 static esp_err_t wlink_start_debug_task(void)
 {
-#if CONFIG_BRIDGE_ROLE_WIRELESS_HOST
-    /* The host side only relays what the slave sends, so there is nothing to start. */
-    ESP_LOGI(TAG, "Link test is enabled, but only the wireless slave sends it; "
-             "the host side has nothing to send");
-    return ESP_OK;
-#else
+    if (s_role == WLINK_ROLE_HOST) {
+        /* The host side only relays what the slave sends, so there is nothing to start. */
+        ESP_LOGI(TAG, "Link test is enabled, but only the wireless slave sends it; "
+                 "the host side has nothing to send");
+        return ESP_OK;
+    }
+
     if (xTaskCreate(wlink_debug_task, "wlink_debug", 3 * 1024, NULL, 3, NULL) != pdPASS) {
         ESP_LOGE(TAG, "Cannot start the link test task");
         return ESP_ERR_NO_MEM;
@@ -337,7 +345,6 @@ static esp_err_t wlink_start_debug_task(void)
 
     ESP_LOGI(TAG, "Link test: sending \"connected N\" once per second once the peer is known");
     return ESP_OK;
-#endif
 }
 
 #endif /* CONFIG_WLINK_DEBUG_LINK_TEST */
@@ -364,7 +371,7 @@ uint8_t wlink_next_seq(void)
     return s_seq++;
 }
 
-const char *wlink_msg_type_str(wlink_msg_type_t type)
+static const char *wlink_msg_type_str(wlink_msg_type_t type)
 {
     switch (type) {
     case WLINK_MSG_BEACON:

@@ -49,6 +49,10 @@ static const char *TAG = "bridge_glue";
 #define BRIDGE_SWD_REQ_QUEUE_DEPTH 8
 #define BRIDGE_SWD_SEQ_FIFO_DEPTH 32
 
+/* Sub types carried on WLINK_CHANNEL_SERIAL_CMD (the link's frame envelope is private). */
+#define BRIDGE_SERCMD_LINE_CODING 0u   /*!< payload: uint32_t baud, little endian */
+#define BRIDGE_SERCMD_LINE_STATE  1u   /*!< payload: {dtr, rts} */
+
 /* How often the host relay re-checks the link while it waits for the peer. */
 #define BRIDGE_PEER_POLL_MS 100
 
@@ -144,7 +148,7 @@ static void bridge_on_uart_data(const uint8_t *data, size_t len)
     status_led_notify_activity(STATUS_LED_ACT_SERIAL);
 
 #if CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE
-    wlink_send(WLINK_MSG_SERIAL, 0, 0, data, len);
+    wlink_send(WLINK_CHANNEL_SERIAL, 0, 0, data, len);
 #else
     serial_bridge_target_data_received(data, len);
 #endif
@@ -256,13 +260,16 @@ static void bridge_swd_seq_drop_last(void)
 }
 
 /* Runs in the Wi-Fi task: only queues the request, the DAP engine runs in its own task. */
-static void bridge_slave_swd_rx(const wlink_hdr_t *hdr, const uint8_t *payload, size_t len)
+static void bridge_slave_swd_rx(wlink_channel_t channel, uint8_t sub, uint8_t seq,
+                                const uint8_t *payload, size_t len)
 {
+    (void)channel;
+    (void)sub;
     status_led_notify_activity(STATUS_LED_ACT_SWD);
 
     if (len == 0 || len > BRIDGE_SWD_PKT_SIZE) {
         ESP_LOGW(TAG, "DAP request seq %u has an unusable length (%u bytes), dropped",
-                 hdr->seq, (unsigned)len);
+                 seq, (unsigned)len);
         return;
     }
 
@@ -275,7 +282,7 @@ static void bridge_slave_swd_rx(const wlink_hdr_t *hdr, const uint8_t *payload, 
     bool have_cached = false;
 
     portENTER_CRITICAL(&s_swd_seq_mux);
-    if (s_swd_last_valid && hdr->seq == s_swd_last_seq) {
+    if (s_swd_last_valid && seq == s_swd_last_seq) {
         cached_len = s_swd_last_resp_len;
         memcpy(cached, s_swd_last_resp, cached_len);
         have_cached = true;
@@ -285,13 +292,13 @@ static void bridge_slave_swd_rx(const wlink_hdr_t *hdr, const uint8_t *payload, 
     if (have_cached) {
         /* The host missed our answer: reply from the cache instead of running the
            DAP command a second time, which could double-apply a register write. */
-        BRIDGE_SWD_PKT_LOG("DAP request seq %u served from the cache (retransmit)", hdr->seq);
-        wlink_send(WLINK_MSG_SWD, 0, hdr->seq, cached, cached_len);
+        BRIDGE_SWD_PKT_LOG("DAP request seq %u served from the cache (retransmit)", seq);
+        wlink_send(WLINK_CHANNEL_SWD, 0, seq, cached, cached_len);
         return;
     }
 
     bridge_swd_req_t req = {
-        .seq = hdr->seq,
+        .seq = seq,
         .len = (uint8_t)len,
     };
     memcpy(req.data, payload, req.len);
@@ -305,8 +312,8 @@ static void bridge_slave_swd_rx(const wlink_hdr_t *hdr, const uint8_t *payload, 
     bool queued = false;
 
     portENTER_CRITICAL(&s_swd_seq_mux);
-    duplicate = bridge_swd_seq_pending(hdr->seq);
-    if (!duplicate && s_swd_req_q && bridge_swd_seq_push(hdr->seq)) {
+    duplicate = bridge_swd_seq_pending(seq);
+    if (!duplicate && s_swd_req_q && bridge_swd_seq_push(seq)) {
         if (xQueueSend(s_swd_req_q, &req, 0) != pdTRUE) {
             bridge_swd_seq_drop_last();
         } else {
@@ -318,17 +325,17 @@ static void bridge_slave_swd_rx(const wlink_hdr_t *hdr, const uint8_t *payload, 
     if (duplicate) {
         /* Already accepted: the answer to it is on its way, and once it is cached a
            retransmission is served from there. */
-        BRIDGE_SWD_PKT_LOG("DAP request seq %u is already in flight, ignored", hdr->seq);
+        BRIDGE_SWD_PKT_LOG("DAP request seq %u is already in flight, ignored", seq);
         return;
     }
 
     if (!queued) {
-        ESP_LOGW(TAG, "SWD request seq %u dropped: request queue not ready or full", hdr->seq);
+        ESP_LOGW(TAG, "SWD request seq %u dropped: request queue not ready or full", seq);
         return;
     }
 
     BRIDGE_SWD_PKT_LOG("DAP request seq %u received over the link (%u bytes), queued",
-                       hdr->seq, (unsigned)req.len);
+                       seq, (unsigned)req.len);
 }
 
 static void bridge_slave_swd_rx_task(void *arg)
@@ -406,7 +413,7 @@ static void bridge_slave_swd_tx_task(void *arg)
                      (unsigned)len);
         } else if (n == 0) {
             BRIDGE_SWD_PKT_LOG("DAP response seq %u is empty, nothing to send", seq);
-        } else if (wlink_send(WLINK_MSG_SWD, 0, seq, s_swd_last_resp, n) != ESP_OK) {
+        } else if (wlink_send(WLINK_CHANNEL_SWD, 0, seq, s_swd_last_resp, n) != ESP_OK) {
             ESP_LOGW(TAG, "Cannot send DAP response seq %u", seq);
         } else {
             BRIDGE_SWD_PKT_LOG("DAP response seq %u sent over the link (%u bytes)",
@@ -417,15 +424,18 @@ static void bridge_slave_swd_tx_task(void *arg)
     }
 }
 
-static void bridge_on_link_sercmd(const wlink_hdr_t *hdr, const uint8_t *payload, size_t len)
+static void bridge_on_link_sercmd(wlink_channel_t channel, uint8_t sub, uint8_t seq,
+                                 const uint8_t *payload, size_t len)
 {
-    if (hdr->sub == WLINK_SERCMD_LINE_CODING && len >= sizeof(uint32_t)) {
+    (void)channel;
+    (void)seq;
+    if (sub == BRIDGE_SERCMD_LINE_CODING && len >= sizeof(uint32_t)) {
         uint32_t baud = 0;
         memcpy(&baud, payload, sizeof(baud));
         if (serial_handler_set_baudrate(baud) != ESP_OK) {
             ESP_LOGW(TAG, "Remote baudrate %" PRIu32 " rejected", baud);
         }
-    } else if (hdr->sub == WLINK_SERCMD_LINE_STATE && len >= 2) {
+    } else if (sub == BRIDGE_SERCMD_LINE_STATE && len >= 2) {
         /* The BOOT/RST pins are on this side, so the mapping happens here. */
         bridge_apply_line_state(payload[0] != 0, payload[1] != 0);
     }
@@ -479,17 +489,20 @@ static volatile uint8_t s_host_swd_tx_seq;
 static bool s_host_probe_started;
 
 /* Runs in the Wi-Fi task: hand the DAP answer over to the USB IN task. */
-static void bridge_host_swd_rx(const wlink_hdr_t *hdr, const uint8_t *payload, size_t len)
+static void bridge_host_swd_rx(wlink_channel_t channel, uint8_t sub, uint8_t seq,
+                               const uint8_t *payload, size_t len)
 {
+    (void)channel;
+    (void)sub;
     status_led_notify_activity(STATUS_LED_ACT_SWD);
 
     if (!s_host_probe_started) {
         return;
     }
 
-    if (hdr->seq != s_host_swd_tx_seq) {
+    if (seq != s_host_swd_tx_seq) {
         BRIDGE_SWD_PKT_LOG("Late DAP response for seq %u (waiting for %u), dropped",
-                           hdr->seq, s_host_swd_tx_seq);
+                           seq, s_host_swd_tx_seq);
         return;
     }
 
@@ -501,7 +514,7 @@ static void bridge_host_swd_rx(const wlink_hdr_t *hdr, const uint8_t *payload, s
         return;
     }
 
-    BRIDGE_SWD_PKT_LOG("DAP response seq %u arrived over the link (%u bytes)", hdr->seq, (unsigned)n);
+    BRIDGE_SWD_PKT_LOG("DAP response seq %u arrived over the link (%u bytes)", seq, (unsigned)n);
     xSemaphoreGive(s_host_swd_resp_sem);
 }
 
@@ -552,7 +565,7 @@ static void bridge_host_swd_relay_task(void *arg)
          */
         bool delivered = false;
         for (int attempt = 0; attempt < CONFIG_WLINK_SWD_RETRIES; attempt++) {
-            if (wlink_send(WLINK_MSG_SWD, 0, seq, req.data, req.len) != ESP_OK) {
+            if (wlink_send(WLINK_CHANNEL_SWD, 0, seq, req.data, req.len) != ESP_OK) {
                 ESP_LOGW(TAG, "Cannot send the DAP request seq %u", seq);
                 continue;
             }
@@ -583,8 +596,12 @@ static void bridge_host_swd_relay_task(void *arg)
 
 /* ------------------------------------------------------------ common link handlers */
 
-static void bridge_on_link_serial(const wlink_hdr_t *hdr, const uint8_t *payload, size_t len)
+static void bridge_on_link_serial(wlink_channel_t channel, uint8_t sub, uint8_t seq,
+                                 const uint8_t *payload, size_t len)
 {
+    (void)channel;
+    (void)sub;
+    (void)seq;
     status_led_notify_activity(STATUS_LED_ACT_SERIAL);
 
 #if CONFIG_BRIDGE_ROLE_WIRELESS_HOST
@@ -644,14 +661,14 @@ esp_err_t bridge_uplink_init(void)
     /* From here on the status LED can tell an unpaired link from a paired one. */
     status_led_set_link_ops(&k_led_link_ops);
 
-    err = wlink_register_rx(WLINK_MSG_SERIAL, bridge_on_link_serial);
+    err = wlink_register_rx(WLINK_CHANNEL_SERIAL, bridge_on_link_serial);
     if (err != ESP_OK) {
         return err;
     }
 
  #if CONFIG_BRIDGE_ROLE_WIRELESS_HOST
     /* The host has no target UART: it only relays to the link. */
-    return wlink_register_rx(WLINK_MSG_SWD, bridge_host_swd_rx);
+    return wlink_register_rx(WLINK_CHANNEL_SWD, bridge_host_swd_rx);
  #else
     /*
      * The queue has to exist before the receive callback is registered below: a request
@@ -666,12 +683,12 @@ esp_err_t bridge_uplink_init(void)
         }
     }
 
-    err = wlink_register_rx(WLINK_MSG_SWD, bridge_slave_swd_rx);
+    err = wlink_register_rx(WLINK_CHANNEL_SWD, bridge_slave_swd_rx);
     if (err != ESP_OK) {
         return err;
     }
 
-    err = wlink_register_rx(WLINK_MSG_SERIAL_CMD, bridge_on_link_sercmd);
+    err = wlink_register_rx(WLINK_CHANNEL_SERIAL_CMD, bridge_on_link_sercmd);
     if (err != ESP_OK) {
         return err;
     }
@@ -701,7 +718,7 @@ esp_err_t bridge_serial_send(const uint8_t *data, size_t len)
         ESP_LOGD(TAG, "No peer yet, %u serial bytes dropped", (unsigned)len);
         return ESP_OK;  /* not an error: the peer may simply not be up yet */
     }
-    return wlink_send(WLINK_MSG_SERIAL, 0, 0, data, len);
+    return wlink_send(WLINK_CHANNEL_SERIAL, 0, 0, data, len);
 #else
     return serial_handler_send_data(data, len);
 #endif
@@ -717,7 +734,7 @@ esp_err_t bridge_serial_set_baudrate(uint32_t baud)
         ESP_LOGD(TAG, "No peer yet, baudrate %" PRIu32 " not forwarded", baud);
         return ESP_OK;
     }
-    return wlink_send(WLINK_MSG_SERIAL_CMD, WLINK_SERCMD_LINE_CODING, 0, payload, sizeof(payload));
+    return wlink_send(WLINK_CHANNEL_SERIAL_CMD, BRIDGE_SERCMD_LINE_CODING, 0, payload, sizeof(payload));
 #else
     return serial_handler_set_baudrate(baud);
 #endif
@@ -732,7 +749,7 @@ esp_err_t bridge_serial_set_line_state(bool dtr, bool rts)
         ESP_LOGD(TAG, "No peer yet, DTR/RTS not forwarded");
         return ESP_OK;
     }
-    return wlink_send(WLINK_MSG_SERIAL_CMD, WLINK_SERCMD_LINE_STATE, 0, payload, sizeof(payload));
+    return wlink_send(WLINK_CHANNEL_SERIAL_CMD, BRIDGE_SERCMD_LINE_STATE, 0, payload, sizeof(payload));
 #else
     return bridge_apply_line_state(dtr, rts);
 #endif
