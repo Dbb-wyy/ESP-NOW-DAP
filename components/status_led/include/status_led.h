@@ -10,15 +10,14 @@
 #include <stdint.h>
 
 #include "esp_err.h"
-#include "sdkconfig.h"
 
 /*
  * Addressable (WS2812) status LED.
  *
  * The feature is switched on with CONFIG_BRIDGE_LED_ENABLE; with it disabled (which is
  * always the case for the wired role, see the Kconfig dependency) there is no LED pin at
- * all and every function below either compiles to a stub or, for the two notifying
- * helpers, to an empty inline function. A call site therefore never needs an #if.
+ * all and the implementation in status_led.c compiles to no-op functions that ignore their
+ * arguments. A call site therefore never needs an #if.
  *
  * The LED reports the state of the bridge, not the state of the USB device: while the
  * ESP-NOW link is up it breathes cyan, while the link is down it flashes amber, and
@@ -83,21 +82,13 @@ esp_err_t status_led_init(void);
  * @brief Register the link state source. The pointer must outlive the caller's use of
  *        the LED; every current caller passes a static const structure.
  */
-#if CONFIG_BRIDGE_LED_ENABLE
 void status_led_set_link_ops(const status_led_link_ops_t *ops);
-#else
-static inline void status_led_set_link_ops(const status_led_link_ops_t *ops) { (void)ops; }
-#endif
 
 /**
  * @brief Stamp one activity event. Cheap, lock free and safe from any task, including
  *        the USB and Wi-Fi callbacks.
  */
-#if CONFIG_BRIDGE_LED_ENABLE
 void status_led_notify_activity(status_led_activity_t act);
-#else
-static inline void status_led_notify_activity(status_led_activity_t act) { (void)act; }
-#endif
 
 /**
  * @brief Open or close the SWD session that keeps the blue state latched.
@@ -107,11 +98,7 @@ static inline void status_led_notify_activity(status_led_activity_t act) { (void
  * defaults to 0, which means only Disconnect closes the session; a non-zero value is a safety
  * net for a debugger that dies without sending one, refreshed by packets inside the session.
  */
-#if CONFIG_BRIDGE_LED_ENABLE
 void status_led_notify_swd_session(bool active);
-#else
-static inline void status_led_notify_swd_session(bool active) { (void)active; }
-#endif
 
 #ifdef __cplusplus
 }

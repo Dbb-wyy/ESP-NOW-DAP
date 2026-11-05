@@ -489,6 +489,19 @@ void status_led_notify_swd_session(bool active) {
 
 #else /* !CONFIG_BRIDGE_LED_ENABLE */
 
+void status_led_set_link_ops(const status_led_link_ops_t *ops) {
+    /* No pin is claimed and no renderer runs, so there is nothing to feed. */
+    (void)ops;
+}
+
+void status_led_notify_activity(status_led_activity_t act) {
+    (void)act;
+}
+
+void status_led_notify_swd_session(bool active) {
+    (void)active;
+}
+
 esp_err_t status_led_init(void) {
     /* No pin is claimed, so there is nothing to validate and nothing to touch.
      */
