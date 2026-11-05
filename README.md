@@ -6,7 +6,7 @@
 
 # 中文
 
-> 因为高价买到垃圾无线调试器，一怒之下选择自己开发。
+> 高价入手的无线调试器有严重缺陷，于是有了这个项目。
 
 ESP-NOW-DAP 是一个基于 [ESP-IDF](https://github.com/espressif/esp-idf) 的项目，把电脑（PC）与目标单片机（MCU）之间的串口和 SWD 调试线「延长」到无线：桥接板用 USB 连 PC，目标侧板子通过 ESP-NOW 接收**同样的**串口与 SWD 两路数据，PC 不再需要与目标有线相连。两路数据可以**同时**使用。
 
@@ -239,7 +239,7 @@ pre-commit install
 
 # English
 
-> I bought an overpriced, piece-of-junk wireless debugger — and got so angry that I built my own.
+> The expensive wireless debugger I bought had serious flaws — so this project was born.
 
 ESP-NOW-DAP is an [ESP-IDF](https://github.com/espressif/esp-idf) project that "extends" the serial and SWD debug lines between a computer (PC) and a target microcontroller (MCU) over the air: a bridge board is plugged into the PC over USB, while a board next to the target receives the **same** serial and SWD streams through ESP-NOW. The PC no longer needs a wired connection to the target, and the two streams can be used **at the same time**.
 
