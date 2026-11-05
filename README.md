@@ -77,7 +77,7 @@ idf.py -B build_wired -D SDKCONFIG=sdkconfig.wired \
 | `slave_c6` | ESP32-C6 | 无线从机 | `sdkconfig.defaults;sdkconfig.defaults.wireless_slave` | 目标侧从机，体积更小 |
 | `slave_c3` | ESP32-C3 | 无线从机 | `sdkconfig.defaults;sdkconfig.defaults.wireless_slave` | 目标侧从机，体积更小 |
 
-截至 2026-11，以上五种组合均已在 ESP-IDF v6.0.2 下从零构建通过；ESP32-S3 主机与 ESP32-C3 / ESP32-C6 从机已上板验证串口日志、ESP-NOW 配对与启动流程。无线吞吐、距离与穿墙能力还没有严谨测量，见[无线性能](#无线性能)。
+截至 2026-11，以上五种组合均已在 ESP-IDF v6.0.2 下从零构建通过；ESP32-S3 主机与 ESP32-C3 / ESP32-C6 从机已上板验证串口日志、ESP-NOW 配对与启动流程。SWD 烧录吞吐已实测（见[无线性能](#无线性能)）；距离、穿墙与串口吞吐仍待测。
 
 ## 来源与致谢
 
@@ -173,8 +173,19 @@ idf.py -p /dev/ttyACMx monitor
 
 ### 无线性能
 
-还没做过严谨的无线测试。目前只试过主机放「电梯口」、从机放「实验室」，能正常烧录。（乐）
-具体通信速度、距离上限和穿墙能力待测。
+目前只试过主机放「电梯口」、从机放「实验室」，能正常烧录。（乐）距离上限、穿墙能力和串口吞吐仍待测。
+
+**SWD 烧录吞吐（实测，2026-11-05）**：S3 主机（CMSIS-DAP）经 ESP-NOW 无线连接到 C6 从机，从机 SWD 接 STM32F103C8（目标 flash 64 KiB）。
+
+| 指标 | 实测值 |
+|---|---|
+| 最大可用 SWD 时钟 | ≈5.95 MHz（6 MHz 起目标 flash 写入算法中止） |
+| 写入吞吐（64 KiB 镜像） | ≈12.2 KiB/s |
+| 校验吞吐（64 KiB 镜像） | ≈61 KiB/s |
+| 整片 64 KiB 烧录 + 校验 + 复位 | 6.8–7.2 s |
+| 8.7 KiB 小镜像烧录 + 校验 + 复位 | ≈2.0 s |
+
+参考：STM32F103 用有线 ST-Link 通常可达 20–50 KiB/s，无线链路约为其 1/2–1/4，适合调试与小固件迭代，大固件仍建议有线 DAP。
 
 ## 状态灯
 
@@ -310,7 +321,7 @@ Both wireless roles require the CMSIS-DAP SWD debug interface; the role default 
 | `slave_c6` | ESP32-C6 | wireless slave | `sdkconfig.defaults;sdkconfig.defaults.wireless_slave` | Slave next to the target, smaller footprint |
 | `slave_c3` | ESP32-C3 | wireless slave | `sdkconfig.defaults;sdkconfig.defaults.wireless_slave` | Slave next to the target, smaller footprint |
 
-As of 2026-11 all five combinations build from scratch on ESP-IDF v6.0.2, and an ESP32-S3 host paired with an ESP32-C3 / ESP32-C6 slave has been verified on hardware (boot log, ESP-NOW pairing, startup sequence). Wireless throughput, range and wall penetration have not been measured rigorously yet — see [Wireless performance](#wireless-performance).
+As of 2026-11 all five combinations build from scratch on ESP-IDF v6.0.2, and an ESP32-S3 host paired with an ESP32-C3 / ESP32-C6 slave has been verified on hardware (boot log, ESP-NOW pairing, startup sequence). SWD flashing throughput has been measured — see [Wireless performance](#wireless-performance); range, wall penetration and serial throughput are still unmeasured.
 
 ## Origin and credits
 
@@ -406,8 +417,19 @@ Build instructions are in [Roles and target chips](#roles-and-target-chips); the
 
 ### Wireless performance
 
-Not rigorously tested yet. So far we've only tried the host at the "elevator entrance" and the slave in the "lab", and flashing works. (heh)
-Actual throughput, maximum range, and wall penetration remain to be measured.
+So far we've only tried the host at the "elevator entrance" and the slave in the "lab", and flashing works. (heh) Range, wall penetration and serial throughput are still unmeasured.
+
+**SWD flashing throughput (measured 2026-11-05)**: an S3 host (CMSIS-DAP) paired with a C6 slave over ESP-NOW, the slave driving an STM32F103C8 (64 KiB flash) through SWD.
+
+| Metric | Measured |
+|---|---|
+| Max usable SWD clock | ≈5.95 MHz (the target flash-write algorithm aborts at 6 MHz) |
+| Write throughput (64 KiB image) | ≈12.2 KiB/s |
+| Verify throughput (64 KiB image) | ≈61 KiB/s |
+| Full 64 KiB program + verify + reset | 6.8–7.2 s |
+| 8.7 KiB image program + verify + reset | ≈2.0 s |
+
+For reference, a wired ST-Link on the same STM32F103 typically reaches 20–50 KiB/s; the wireless link is about 1/2–1/4 of that — fine for debugging and small-firmware iteration, while large images are better flashed with a wired DAP.
 
 ## Status LED
 
