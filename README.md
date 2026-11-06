@@ -90,7 +90,7 @@ idf.py -B build_wired -D SDKCONFIG=sdkconfig.wired \
 本仓库新增的是无线层，以及让角色切换成为可能的中间层：
 
 - `components/wireless_link/` —— 带对端发现与按流分发的 ESP-NOW 链路
-- `main/bridge_glue.c` —— 在 USB、目标串口/SWD 引脚与链路之间做角色分发的中间层
+- `components/bridge/` —— 在 USB、目标串口/SWD 引脚与链路之间做角色分发的中间层（`bridge.c` 共享链路 + `bridge_wired/host/slave.c` 每角色一个文件）
 - `docs/wireless.md` —— 无线部分的设计说明
 
 所有源自 EUB 的文件中，上游版权声明均原样保留；本仓库不携带上游仓库的提交历史。
@@ -232,7 +232,7 @@ wired 角色同样支持状态灯（默认随 `sdkconfig.defaults.esp32s3` 用 G
 
 - 源自 **ESP USB Bridge** 的部分：Copyright 2020-2026 Espressif Systems (Shanghai) Co Ltd.
 - `components/debug_probe/DAP/` 下的 CMSIS-DAP 源码：Copyright (c) 2013-2022 ARM Limited.
-- 无线层（`components/wireless_link/`、`main/bridge_glue.*`、`docs/wireless.md`）以及本仓库中的其他修改：Copyright 2026 Dbb.
+- 无线层（`components/wireless_link/`、`components/bridge/`、`docs/wireless.md`）以及本仓库中的其他修改：Copyright 2026 Dbb.
 
 ## 贡献
 
@@ -337,7 +337,7 @@ Everything that makes the bridge work over USB comes from that project: the comp
 What this repository adds is the wireless layer and the plumbing that makes a role switch possible:
 
 - `components/wireless_link/` — an ESP-NOW link with peer discovery and per-stream dispatch
-- `main/bridge_glue.c` — the role dispatching glue between USB, the target UART/SWD pins and the link
+- `components/bridge/` — the role dispatching layer between USB, the target UART/SWD pins and the link (`bridge.c` shared, `bridge_wired/host/slave.c` one file per role)
 - `docs/wireless.md` — the wireless design notes
 
 Upstream copyright notices are retained unchanged in every file that came from EUB; this repository does not carry the upstream commit history.
@@ -489,7 +489,7 @@ as-is in the SPDX header of the file it belongs to:
 
 - Portions originating from **ESP USB Bridge**: Copyright 2020-2026 Espressif Systems (Shanghai) Co Ltd.
 - CMSIS-DAP sources under `components/debug_probe/DAP/`: Copyright (c) 2013-2022 ARM Limited.
-- The wireless layer (`components/wireless_link/`, `main/bridge_glue.*`, `docs/wireless.md`)
+- The wireless layer (`components/wireless_link/`, `components/bridge/`, `docs/wireless.md`)
   and other modifications made in this repository: Copyright 2026 Dbb.
 
 ## Contributing

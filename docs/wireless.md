@@ -16,7 +16,7 @@ flashed on each of the two boards**.
 
 | Role | Sits next to | USB | Target pins | ESP-NOW |
 |---|---|---|---|---|
-| `Wired` | everything in one chip | CDC + vendor bulk + MSC | UART, SWD, BOOT/RST | unused |
+| `Wired` | everything in one chip | CDC + vendor bulk | UART, SWD, BOOT/RST | unused |
 | `Wireless host` | the PC | CDC (serial) + vendor bulk (CMSIS-DAP) | none | relays both streams |
 | `Wireless slave` | the target board | **none** | UART, SWD (SWCLK/SWDIO), BOOT/RST | terminates both streams |
 
@@ -282,9 +282,10 @@ supported slave targets carry their own preset:
 
 ## 9. Limitations
 
-* The wireless roles have **no mass storage / UF2 interface**, because the host has
-  no local UART to flash through. Flash the target with `esptool` over the
-  tunneled serial port instead.
+* No role exposes a mass storage / UF2 interface: the wired role's fake USB
+  drive was removed in the refactor, and the wireless host has no local UART to
+  flash through. Flash the target with `esptool` over the wired USB CDC port or
+  the tunneled serial port instead.
 * ESP-NOW round-trip latency is in the millisecond range, so keep the OpenOCD
   adapter speed low (start at 1000 kHz) and expect flashing to be much slower than
   wired. Raise `CONFIG_WLINK_SWD_RETRIES` on a noisy link.

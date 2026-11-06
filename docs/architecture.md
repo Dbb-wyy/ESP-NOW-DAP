@@ -1,14 +1,13 @@
 # Architecture of the END_nightly bridge
 
-This document describes the **target** component architecture of the END_nightly bridge.
-The code is migrated towards it phase by phase; see `.agent/Plan_v2.md` for the execution
-plan, the current status and the acceptance gates.
+This document describes the component architecture of the END_nightly bridge as it stands in
+the final code. See `.agent/Plan_v2.md` for the execution plan and the acceptance records.
 
 Scope of this document: component boundaries, dependency rules, start-up order and interface
 contracts. Build/flash commands live in the `.dsh/skills/` skills, rules for the engineer/agent
 live in `.agent/Agent.md`.
 
-Status of this document: describes the target. Phase 6 (B4) updates it to match the final code.
+Status of this document: matches the final code (B4, tag `modular-b4`).
 
 ## 1. Roles and data flows
 
@@ -63,7 +62,7 @@ Dependency rules:
 Only `components/bridge/` may look at `CONFIG_BRIDGE_ROLE_*`, and it must be the only place
 that converts the build-time role into behaviour.
 
-## 3. Start-up order (target)
+## 3. Start-up order
 
 Wired / wireless host (chips with USB OTG, currently ESP32-S3):
 
@@ -96,7 +95,7 @@ Rules:
 - the "free heap" line and the two role lines (`running as wireless slave/host`) stay in the
   log because the flash skill matches on them.
 
-## 4. Interface contracts (finalised in phases 4-6)
+## 4. Interface contracts
 
 ### 4.1 `usb_device`
 
@@ -198,5 +197,5 @@ All five produce `bridge.bin`; commands and success criteria are in the `esp-idf
 
 The behaviour contract is listed once in `.agent/Plan_v2.md` §4 (wire protocol, DAP timing,
 slave sequence FIFO, dedicated-GPIO core binding, pin defaults, Kconfig symbols/menu, build
-matrix and product names). This document does not repeat it; it only explains how the target
+matrix and product names). This document does not repeat it; it only explains how the component
 structure preserves it.

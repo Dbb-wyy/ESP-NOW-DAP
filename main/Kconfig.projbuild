@@ -12,7 +12,7 @@ menu "END-config"
                 Select which end of the bridge this firmware implements.
 
                 Wired: a single chip carrying both ends, USB on one side and the target
-                UART/JTAG/SWD plus the mass storage disk on the other.
+                UART/JTAG/SWD plus the BOOT/RST pins on the other.
 
                 Wireless host: sits next to the PC. USB CDC and the CMSIS-DAP bulk
                 interface are tunnelled over ESP-NOW to a wireless slave.
