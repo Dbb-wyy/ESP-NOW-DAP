@@ -94,7 +94,7 @@
 | B9 | 请求往返 RTT（T1.1 `bench.py rtt`，n=30，`mdw` 单字读 @2000 kHz） | min **1934** / p50 **2541.5** / mean 3101.5 / p95 5646 / max 7265 µs | `perf_out/20261106-224619-rtt.{json,md}` |
 | B10 | 批量读 `dump_image` 32 KiB @2000 kHz（`bench.py bulk-read`，n=5） | min **8.145** / p50 **13.798** / mean 15.196 / max 21.151 KiB/s | `perf_out/20261106-224635-bulk-read.{json,md}` |
 | B11 | 批量写 RAM `load_image` 32 KiB @2000 kHz（`bench.py bulk-write-ram`，n=5） | min **21.725** / p50 **23.385** / mean 23.226 / max 24.304 KiB/s；1 次挂死被重试救回 | `perf_out/20261106-224956-bulk-write-ram.{json,md}` |
-| B12 | 烧录端到端（`bench.py flash-program`，T1.1） | **未取得**：本轮 8/8 次尝试全部 `hang_during_program`（3 次 @2000 kHz、5 次 @500 kHz，wall≈50 s 被外部 kill）；单会话手测 100/500/2000 kHz 均挂 | `perf_out/20261106-230410-flash-program.{json,md}`、`/tmp/bench_flash500.log` |
+| B12 | 烧录端到端（`bench.py flash-program`，T1.1） | **未取得**：本轮 10 次尝试 **0 成功**——@2000 kHz 5 次（4 次 `hang_during_program` wall≈50 s、1 次 `error` 31 s）、@500 kHz 5 次全部 `hang_during_program` wall≈50 s（均由外部 kill 收尾）；单会话手测 100/500/2000 kHz 也全部挂 | `/tmp/bench_flash.log`、`/tmp/bench_flash500.log`；另有 `perf_out/20261106-230410-flash-program.{json,md}` 记录的是更早一轮 2 次 `dap_dead`（残留 openocd 占 USB 节点所致，属环境干扰，非本行口径） |
 
 **B12 的成因（已定位，属产品缺陷而非工具问题）**：`flash erase_sector` 1.5 s 成功、`flash write_image` 1 KB 成功（0.16 s / 6.181 KiB/s），但 55 KB 图像必定挂在 flash 异步算法的 16 KB 工作区阶段；同刻 S3 控制台恰好一条 `W bridge: DAP request seq 89 was not answered after 3 attempts, link is paired`，C6 侧仅 `debug_gpio: SWD GPIO init done`。即链路丢/迟一次 DAP 事务后，host relay 放弃重试只打日志、不向 USB 侧交付失败（`components/bridge/bridge_host.c:137-143`），USB 侧 `usb_send_task` 阻塞 `portMAX_DELAY`（`components/usb_device/eub_vendord.c:210`），openocd 无超时 → 永久挂起（= B7 的同一缺陷，见 `.agent/Plan_v3.md` §1.3 缺陷 1）。
 
@@ -149,7 +149,7 @@
 | 日期 | 固件 | 目标 | 次数 | 成功 | 挂死 | 其它错误 | 成功率 | 证据 |
 |---|---|---|---|---|---|---|---|---|
 | 2026-11-06 | `32408ff` | F407 | 20 | 17 | 3 | 0（另 2 次反例属配置错误，不计） | 85% | `/tmp/f407w_*.log` |
-| 2026-11-06 夜 | `32408ff` | F407 | 8 | 0 | 8 | 0 | **0%** | `perf_out/20261106-230410-flash-program.*`、`/tmp/bench_flash500.log` |
+| 2026-11-06 夜 | `32408ff` | F407 | 10 | 0 | 9 | 1（`error`，31 s） | **0%** | `/tmp/bench_flash.log`、`/tmp/bench_flash500.log` |
 
 阈值（T4.1 定稿时填实）：100 次挂死 0；丢帧时 ≤1 s 快速失败；RTT p99 ≤0.8× 基线；批量读 ≥1.3× 基线；F407 `program` WALL median ≤4.5 s。
 
