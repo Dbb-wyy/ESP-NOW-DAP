@@ -70,8 +70,8 @@ Wired / wireless host (chips with USB OTG, currently ESP32-S3):
 ```
 app_main()
   status_led_init()                 // best effort, failure only warns
-  bridge_init()                     // role decision; builds usb_device_ops_t and registers it
-  usb_device_start()                // PHY -> serial_bridge_init -> tusb_init -> TinyUSB task
+  bridge_start()                    // role decision; registers usb_device_ops_t, then
+                                    // PHY -> serial_bridge_init -> tusb_init -> TinyUSB task
                                     // mount callback inside usb_device:
                                     //     ops->probe_init(); eub_vendord_start();
   ESP_LOGI("Free heap after start-up: %u bytes", ...)
@@ -82,7 +82,7 @@ Wireless slave (ESP32-C6 / C3, no USB):
 ```
 app_main()
   status_led_init()
-  bridge_init()                     // creates the SWD request queue, registers link callbacks,
+  bridge_start()                    // registers link callbacks, creates the SWD request queue,
                                     // starts the two SWD relay tasks bound to the dedicated-GPIO core
   ESP_LOGI("Free heap after start-up: %u bytes", ...)
 ```
@@ -175,7 +175,8 @@ stub file exists. Only `wireless_slave` builds are supported there; `bridge` onl
 
 ### 4.6 `bridge`
 
-- `bridge_init()` is the only entry point that `main/` calls for business logic.
+- `bridge_start()` is the only entry point that `main/` calls for business logic;
+  it starts the USB device too, so `main/` contains no role branch.
 - Role implementations live in their own files (`bridge_wired.c`, `bridge_host.c`,
   `bridge_slave.c`); `bridge.c` keeps the shared code and the role decision.
 - `bridge` owns the `usb_device_ops_t` table and the registration; it owns the DTR/RTS policy,

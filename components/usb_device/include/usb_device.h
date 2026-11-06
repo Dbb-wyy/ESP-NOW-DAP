@@ -14,7 +14,7 @@
  * descriptor and the CDC/vendor class glue. It knows nothing about the bridge roles.
  *
  * The reverse direction (USB -> target) goes through the ops table below, which
- * main/bridge_glue.c registers before usb_device_start() is called:
+ * components/bridge registers before usb_device_start() is called:
  *
  *   host -> CDC data        -> usb_device_ops_t::serial_send()
  *   host -> line coding     -> usb_device_ops_t::serial_set_baudrate()

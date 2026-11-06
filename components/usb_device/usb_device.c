@@ -7,7 +7,7 @@
 /*
  * USB device stack: descriptors, tinyusb callbacks and the device task.
  *
- * The bridge side (bridge_glue.c) registers a usb_device_ops_t table before
+ * The bridge side (components/bridge) registers a usb_device_ops_t table before
  * usb_device_start(). Until then the descriptors still answer enumeration; the
  * mount callback is the first point that needs the probe backend.
  */

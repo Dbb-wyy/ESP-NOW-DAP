@@ -52,7 +52,7 @@ menu "END-config"
 
                 The two wireless roles tunnel CMSIS-DAP, which only exists in the SWD
                 build, so selecting ESP-USB JTAG together with a wireless role is a
-                compile time error (see the #error in main/bridge_glue.c).
+                compile time error (see the #error in components/bridge/bridge.c).
 
             config DEBUG_PROBE_IFACE_JTAG
                 bool "ESP-USB JTAG"

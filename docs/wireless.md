@@ -21,7 +21,7 @@ flashed on each of the two boards**.
 | `Wireless slave` | the target board | **none** | UART, SWD (SWCLK/SWDIO), BOOT/RST | terminates both streams |
 
 Both wireless roles require `END-config -> Role configuration -> Debug interface -> CMSIS-DAP SWD`.
-The build fails with an explicit `#error` in `main/bridge_glue.c` otherwise.
+The build fails with an explicit `#error` in `components/bridge/bridge.c` otherwise.
 
 On the ESP32-S3 the default role is the wireless host, so a plain `idf.py build` produces
 the PC-side image; build the wired one with `sdkconfig.defaults.wired`, and the slave with
@@ -168,7 +168,7 @@ like the one above.
 CMSIS-DAP is request/response, and ESP-NOW can drop or duplicate frames, so the
 relay adds a small amount of protocol on top of the link.
 
-**Host side** (`bridge_host_swd_relay_task` in `main/bridge_glue.c`)
+**Host side** (`bridge_host_swd_relay_task` in `components/bridge/bridge_host.c`)
 
 * `tud_vendor` OUT data is queued (non-blocking) so the TinyUSB task is never
   blocked by link latency.
@@ -189,7 +189,7 @@ relay adds a small amount of protocol on top of the link.
   console is much slower than that; `CONFIG_WLINK_SWD_VERBOSE_LOG` promotes it to
   info level when the path has to be diagnosed.
 
-**Slave side** (`bridge_slave_swd_rx` / `_rx_task` / `_tx_task` in `main/bridge_glue.c`)
+**Slave side** (`bridge_slave_swd_rx` / `_rx_task` / `_tx_task` in `components/bridge/bridge_slave.c`)
 
 * The last response is cached together with its sequence number. A retransmitted
   request whose `seq` equals the cached one is answered **from the cache without
