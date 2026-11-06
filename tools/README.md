@@ -31,12 +31,35 @@ tools/flash.py --variant slave_s3 --yes  # unattended (CI, repeated tests)
 tools/flash.py --variant slave_s3 --learn  # also record MAC -> variant
 ```
 
+## Flash both boards with one command
+
+With both boards plugged in, `--all` probes them, resolves each variant from the map
+and flashes them **in parallel** (each board is its own USB device, so the two
+`idf.py` runs do not share anything: different `build_r_<variant>` directory,
+different `sdkconfig.r_<variant>`):
+
+```bash
+tools/flash.py --all --dry-run     # what would be flashed, per board
+tools/flash.py --all               # both boards, one confirmation
+tools/flash.py --all --yes         # unattended
+tools/flash.py --pair              # same, but refuse unless one host + one slave is plugged
+tools/flash.py --all --jobs 1      # serialise the flashes (slowest, safest on a hub)
+```
+
+Each worker flashes, captures its own boot log (`build_r_<variant>/boot_flash.log`)
+and checks that variant's anchors, and the summary at the end is per board, so a
+failure on one board still reports the other. Boards that are not in the map are
+skipped with a warning; two boards mapped to the same variant is a hard error.
+
+Note: probing resets each board into the ROM loader, so expect the link to re-pair
+about a second after the flash (the 1 s beacon does it on its own).
+
 `tools/boards.json` is the learned map. Add a board by flashing it once with
 `--learn`, or by editing the file (MAC in lower case, variant in
 `wired|host|slave_s3|slave_c6|slave_c3`).
 
 Exit codes: `0` done, `1` refused/failed, `2` needs a decision (no board, ambiguous
-port, unknown board).
+port, unknown board, `--pair` without a host or a slave).
 
 ## `perf/` — the measurement harness
 

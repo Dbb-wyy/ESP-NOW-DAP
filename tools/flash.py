@@ -38,6 +38,7 @@ import os
 import re
 import shutil
 import subprocess
+import concurrent.futures
 import sys
 import time
 from pathlib import Path
@@ -107,7 +108,12 @@ def known_serial_devices(include_dap: bool = False) -> list[tuple[str, Path]]:
         for entry in sorted(by_id.iterdir()):
             if not entry.exists():  # dangling symlink (board re-enumerated)
                 continue
-            if not include_dap and "CMSIS-DAP" in entry.name:
+            # The native USB interface of the Espressif board: a different face of the
+            # same chip (CMSIS-DAP when the bridge runs, USB-Serial-JTAG when it does
+            # not). Flashing goes through the CH340 console port.
+            if not include_dap and (
+                entry.name.startswith("usb-Espressif_") or "CMSIS-DAP" in entry.name
+            ):
                 continue
             out.append((entry.name, entry))
     if not out:
@@ -152,7 +158,35 @@ def esptool_path() -> str | None:
     return shutil.which("esptool") or shutil.which("esptool.py")
 
 
-def probe(port: Path, timeout: float = 25.0) -> dict:
+TRANSIENT_PROBE_ERRORS = (
+    "serial exception",
+    "returned no data",
+    "couldn't open port",
+    "could not open",
+    "busy",
+    "access is denied",
+)
+
+
+def probe(port: Path, timeout: float = 25.0, attempts: int = 3) -> dict:
+    """Probe one board, retrying while the port is still recovering from a reset.
+
+    Two boards probed back to back enumerate and reboot independently; a port that
+    answers "readiness to read but returned no data" is usually mid-reboot, not broken.
+    """
+    result: dict = {}
+    for attempt in range(attempts):
+        result = _probe_once(port, timeout)
+        if result.get("ok") or result.get("gone"):
+            return result
+        error = (result.get("error") or "").lower()
+        if attempt + 1 >= attempts or not any(t in error for t in TRANSIENT_PROBE_ERRORS):
+            return result
+        time.sleep(1.5)
+    return result
+
+
+def _probe_once(port: Path, timeout: float = 25.0) -> dict:
     """Ask the ROM who the board is. Read-only: flash-id reads the chip id."""
     tool = esptool_path()
     if tool is None:
@@ -293,7 +327,8 @@ def idf_flash(variant: str, port: Path) -> int:
     """Flash through idf.py (the skill forbids hand-written esptool addresses)."""
     activate = f"source {IDF_ACTIVATE} >/dev/null 2>&1"
     cmd = (
-        f"{activate}; cd {REPO}; idf.py -B build_r_{variant} -p {port} flash"
+        f"{activate}; cd {REPO}; "
+        f"idf.py -B build_r_{variant} -D SDKCONFIG=sdkconfig.r_{variant} -p {port} flash"
     )
     print(f"\n$ bash -c '{activate}; idf.py -B build_r_{variant} -p {port} flash'")
     return subprocess.call(["bash", "-c", cmd], env=idf_env())
@@ -343,6 +378,147 @@ def render_table(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def flash_one(variant: str, board: dict, args) -> dict:
+    """Flash one board and check its boot log. Runs inside a worker thread."""
+    result = {
+        "variant": variant,
+        "mac": board.get("mac"),
+        "port": board["name"],
+        "ok": False,
+    }
+    if idf_flash(variant, board["dev"]) != 0:
+        result["note"] = "idf.py flash failed"
+        return result
+
+    log_path = REPO / f"build_r_{variant}" / "boot_flash.log"
+    log = capture_boot(board["dev"], log_path, args.capture)
+    missing, failures = check_boot(variant, log)
+    result.update(
+        {
+            "ok": not missing and not failures,
+            "log": str(log_path.relative_to(REPO)),
+            "bytes": len(log),
+            "missing": missing,
+            "failures": failures,
+        }
+    )
+    return result
+
+
+def run_batch(args, devices: list[tuple[str, Path]], boards: dict[str, str]) -> int:
+    """Probe every connected board, resolve each variant from the map, flash them together."""
+    print(f"Probing {len(devices)} port(s) with esptool flash-id (each board resets once).\n")
+    rows: list[dict] = []
+    for name, dev in devices:
+        result = probe(dev)
+        if result.get("gone"):
+            print(f"  {name}\n    -> gone (re-enumerated while probing), skipped")
+            continue
+        row = {"name": name, "dev": dev, **result}
+        rows.append(row)
+        status = "ok" if result.get("ok") else f"FAILED: {result.get('error')}"
+        print(f"  {name}\n    -> {row.get('chip', '?')} {row.get('mac', '?')}  [{status}]")
+
+    rows = dedupe_by_mac([r for r in rows if r.get("ok")])
+    if not rows:
+        print("\nNo board answered on the probed ports.", file=sys.stderr)
+        return 2
+
+    unknown = [r for r in rows if not boards.get(r["mac"])]
+    for row in unknown:
+        print(
+            f"\nwarning: {row['mac']} is not in {BOARD_MAP.relative_to(REPO)}; it will not be "
+            f"flashed (use --variant + --port + --learn to add it)."
+        )
+
+    by_variant: dict[str, dict] = {}
+    for row in rows:
+        variant = boards.get(row["mac"])
+        if not variant:
+            continue
+        if variant in by_variant:
+            print(
+                f"\nrefusing: two boards are mapped to {variant} "
+                f"({by_variant[variant]['mac']} and {row['mac']}).",
+                file=sys.stderr,
+            )
+            return 2
+        by_variant[variant] = row
+
+    if not by_variant:
+        print("\nNo board in the map is connected.", file=sys.stderr)
+        return 2
+
+    if args.pair:
+        has_host = "host" in by_variant
+        has_slave = any(v.startswith("slave_") for v in by_variant)
+        if not (has_host and has_slave):
+            print(
+                "\n--pair needs one host and one slave board; found: "
+                + ", ".join(sorted(by_variant)),
+                file=sys.stderr,
+            )
+            return 2
+
+    infos = {variant: build_info(variant) for variant in by_variant}
+    broken = {v: i["errors"] for v, i in infos.items() if i["errors"]}
+    if broken:
+        print("\nrefusing to flash:")
+        for variant, errors in broken.items():
+            for error in errors:
+                print(f"  - {variant}: {error}")
+        return 1
+
+    print("\n=== flash plan (batch) ===")
+    for variant, row in by_variant.items():
+        info = infos[variant]
+        print(
+            f"  {variant:10} {row['mac']}  {row['name']}\n"
+            f"             bridge.bin {info.get('size', '?')} bytes @ {info.get('bin_mtime', '?')}"
+        )
+
+    if args.dry_run:
+        print("\n--dry-run: nothing written.")
+        return 0
+
+    if not args.yes:
+        names = ", ".join(sorted(by_variant))
+        answer = input(f"\nFlash {names} onto the connected boards? [y/N] ")
+        if answer.strip().lower() not in ("y", "yes"):
+            print("aborted.")
+            return 2
+
+    jobs = max(1, min(args.jobs or len(by_variant), len(by_variant)))
+    print(f"\nFlashing {len(by_variant)} board(s), {jobs} at a time.\n")
+    results: list[dict] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
+        futures = [
+            pool.submit(flash_one, variant, row, args)
+            for variant, row in by_variant.items()
+        ]
+        for future in concurrent.futures.as_completed(futures):
+            results.append(future.result())
+
+    print("\n=== result ===")
+    worst = 0
+    for result in sorted(results, key=lambda r: r["variant"]):
+        state = "ok" if result["ok"] else "FAILED"
+        line = (
+            f"  {result['variant']:10} {result['mac']}  {state}"
+            f"  boot log {result.get('log', '-')} ({result.get('bytes', 0)} bytes)"
+        )
+        print(line)
+        if result.get("missing"):
+            print(f"             missing anchors: {', '.join(result['missing'])}")
+        if result.get("failures"):
+            print(f"             failure patterns: {', '.join(result['failures'])}")
+        if result.get("note"):
+            print(f"             {result['note']}")
+        if not result["ok"]:
+            worst = 1
+    return worst
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Detect the board on a serial port and flash the matching variant.",
@@ -366,6 +542,19 @@ def main() -> int:
         action="store_true",
         help="flash even though the MAC is recorded as another variant",
     )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="flash every connected board whose MAC is in tools/boards.json",
+    )
+    parser.add_argument(
+        "--pair",
+        action="store_true",
+        help="like --all, but require one host and one slave board",
+    )
+    parser.add_argument(
+        "--jobs", type=int, default=0, help="boards to flash at once (default: all of them)"
+    )
     parser.add_argument("--dry-run", action="store_true", help="print the plan only")
     parser.add_argument("--learn", action="store_true", help="record MAC -> variant in tools/boards.json")
     parser.add_argument("--capture", type=int, default=8, help="boot log seconds (default 8)")
@@ -383,6 +572,9 @@ def main() -> int:
             print(f"{name:72} {dev}")
         print("\n(--list does not probe: probing resets the board into the ROM loader)")
         return 0
+
+    if args.all or args.pair:
+        return run_batch(args, devices, load_map())
 
     wanted = Path(args.port) if args.port else None
     if wanted is not None and args.port and not args.port.startswith("/"):
