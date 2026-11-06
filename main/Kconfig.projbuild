@@ -296,6 +296,31 @@ menu "END-config"
                 The channel is fixed at start-up instead of following the station
                 configuration, so the link also works when no access point is around.
 
+        choice WLINK_TX_RATE
+            prompt "ESP-NOW transmit rate for the unicast frames"
+            default WLINK_TX_RATE_1M
+            help
+                ESP-NOW transmits at 1 Mbps (802.11b, long preamble) unless told
+                otherwise, which costs about one millisecond of airtime per 64 byte
+                DAP packet. The SWD relay is limited by that airtime, not by the
+                radio hardware, so a faster rate shortens every wireless round trip.
+
+                The price is margin: at 54 Mbps the same frame needs far less
+                airtime but also survives much less interference, so a weak signal
+                that 1 Mbps still carries may be lost. Both devices of a pair must
+                be able to hear the chosen rate; 802.11g rates are the safe common
+                ground for the ESP32-S3 and ESP32-C6.
+
+            config WLINK_TX_RATE_1M
+                bool "1 Mbps (default, most robust)"
+            config WLINK_TX_RATE_11M
+                bool "11 Mbps (802.11b, short preamble)"
+            config WLINK_TX_RATE_24M
+                bool "24 Mbps (802.11g)"
+            config WLINK_TX_RATE_54M
+                bool "54 Mbps (802.11g, shortest airtime)"
+        endchoice
+
         config WLINK_SWD_TIMEOUT_MS
             int "CMSIS-DAP response timeout (ms)"
             default 250

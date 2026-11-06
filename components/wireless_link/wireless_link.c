@@ -60,6 +60,54 @@ static uint32_t wlink_now_ms(void)
 static esp_err_t wlink_start_debug_task(void);
 #endif
 
+/* Bit rate picked in Kconfig, printed once when the peer becomes known. */
+#if CONFIG_WLINK_TX_RATE_11M
+#define WLINK_TX_RATE_MBPS 11
+#elif CONFIG_WLINK_TX_RATE_24M
+#define WLINK_TX_RATE_MBPS 24
+#elif CONFIG_WLINK_TX_RATE_54M
+#define WLINK_TX_RATE_MBPS 54
+#else
+#define WLINK_TX_RATE_MBPS 1
+#endif
+
+/*
+ * ESP-NOW sends at 1 Mbps unless a per-peer rate is configured, which spends about a
+ * millisecond of airtime per 64 byte DAP packet. The SWD relay is limited by that
+ * airtime rather than by the radio, so a faster rate shortens every wireless round
+ * trip. Only unicast peers are configured here: broadcast frames (beacons, and the
+ * first frames sent before the peer is discovered) keep the default rate.
+ */
+static void wlink_set_tx_rate(const uint8_t mac[ESP_NOW_ETH_ALEN])
+{
+    esp_now_rate_config_t rate = {
+        .phymode = WIFI_PHY_MODE_11B,
+        .rate = WIFI_PHY_RATE_1M_L,
+        .ersu = false,
+        .dcm = false,
+    };
+
+#if CONFIG_WLINK_TX_RATE_11M
+    rate.rate = WIFI_PHY_RATE_11M_S;
+#elif CONFIG_WLINK_TX_RATE_24M
+    rate.phymode = WIFI_PHY_MODE_11G;
+    rate.rate = WIFI_PHY_RATE_24M;
+#elif CONFIG_WLINK_TX_RATE_54M
+    rate.phymode = WIFI_PHY_MODE_11G;
+    rate.rate = WIFI_PHY_RATE_54M;
+#endif
+
+    const esp_err_t err = esp_now_set_peer_rate_config(mac, &rate);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Cannot set the ESP-NOW rate for " MACSTR ": %s",
+                 MAC2STR(mac), esp_err_to_name(err));
+        return;
+    }
+
+    ESP_LOGI(TAG, "ESP-NOW transmit rate for " MACSTR ": %d Mbps",
+             MAC2STR(mac), WLINK_TX_RATE_MBPS);
+}
+
 static esp_err_t wlink_add_peer(const uint8_t mac[ESP_NOW_ETH_ALEN])
 {
     esp_now_peer_info_t peer = {
@@ -86,6 +134,9 @@ static void wlink_learn_peer(const uint8_t mac[ESP_NOW_ETH_ALEN])
         ESP_LOGE(TAG, "Cannot add peer " MACSTR, MAC2STR(mac));
         return;
     }
+
+    /* The peer entry exists now, so the Kconfig rate can be applied to it. */
+    wlink_set_tx_rate(mac);
 
     memcpy(s_peer_mac, mac, ESP_NOW_ETH_ALEN);
     s_peer_ready = true;
