@@ -155,6 +155,9 @@
 | 2026-11-07 01:02 | `7e0216c` @24 Mbps | F407 | 10 | **10** | 0 | 0 | **100%** | `/tmp/p2_24m_run_{1..10}.log` |
 | 2026-11-07 01:05 | `7e0216c` @24 Mbps，55,152 B | F407 | 3 | **3** | 0 | 0 | **100%** | `/tmp/p2_24m_55k_*.log` |
 | 2026-11-07 01:09 | `7e0216c` @11 Mbps | F407 | 5 | 3 | 0 | 2（目标状态类：`failed erasing sectors`、`timeout waiting for algorithm`；传输层 0 丢帧） | 60% | `/tmp/p2_11m_run_{1..5}.log` |
+| 2026-11-07 01:22 | `d22c58a` @24 Mbps（提交后回归） | F407 | 10 | 8 | 0 | 2（同为目标状态类，从第 3 次起连续 8 次通过） | 80%（含状态噪声；传输层 0 丢帧） | `/tmp/reg_16k_run_{1..10}.log` |
+| 2026-11-07 01:23 | `d22c58a` @24 Mbps，55,152 B | F407 | 3 | **3** | 0 | 0 | **100%** | `/tmp/reg_55k_{1,2,3}.log` |
+| 2026-11-07 01:24 | `d22c58a` @24 Mbps，用户 ELF `program … verify reset` | F407 | 3 | **3** | 0 | 0 | **100%**（`Verified OK` 3/3，单次 4.3–4.5 s） | `/tmp/reg_elf_{1,2,3}.log` |
 
 ### 已知缺陷 P1（2026-11-07，T3.1 期间定位）
 
@@ -182,6 +185,14 @@
   `main/Kconfig.projbuild` 的 help 说明），54 Mbps 保留为可选项但标注会丢帧。
 - 剩余待查（P2 之后）：host `wlink_send` 侧记录 `esp_now_send` 返回值与 seq，确认 54 Mbps 下
   「3 次重发全部消失」是发送口返回错误还是空口丢帧；若确认是空口，可考虑「重发时降速」的兜底。
+- **24 Mbps 回归（2026-11-07 01:26，HEAD `d22c58a`）**：用户真实 ELF `program … verify reset`
+  **3/3 成功、`Verified OK` 全过、4.27–4.51 s**；16 KB ×10 → 8 次连续成功（WALL 2.05–2.16 s、
+  7.83–8.24 KiB/s），前 2 次失败为 F4 flash 算法对目标状态的敏感（`failed erasing sectors 0 to 0`、
+  `timeout waiting for algorithm`），与无线链路无关，`program`/`reset init` 即规避；55 KB ×3 全过；
+  3 分钟读 soak 416/416 通过（median 13.316 KiB/s，首末四分位 −3.3% 无劣化）。S3 控制台全程
+  `not answered` 0 条。结论：**24 Mbps 默认档解决了用户的实际烧录问题**。
+- 目标状态提示：F4 写入前目标应保持 halted 或使用 `program`（自带 `reset init`）；裸
+  `flash write_image` 在目标 running / 刚复位时会报 `failed erasing sectors` 或算法超时。
 
 阈值（T4.1 定稿时填实）：100 次挂死 0；丢帧时 ≤1 s 快速失败；RTT p99 ≤0.8× 基线；批量读 ≥1.3× 基线；F407 `program` WALL median ≤4.5 s。
 
