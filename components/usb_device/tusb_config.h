@@ -7,7 +7,8 @@
 # pragma once
 
 /*
- * Phase 4 (B2): the tinyusb configuration moves to components/usb_device.
+ * tinyusb configuration for the composite device (CDC + vendor). Included by the
+ * tinyusb library through the include path added in CMakeLists.txt.
  */
 
 #include "sdkconfig.h"

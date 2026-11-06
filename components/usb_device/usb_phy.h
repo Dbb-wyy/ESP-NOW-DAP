@@ -7,7 +7,7 @@
 #pragma once
 
 /*
- * Phase 4 (B2): the internal USB PHY bring-up moves to components/usb_device.
+ * Internal USB OTG PHY bring-up. Private to components/usb_device.
  */
 
 #include "esp_err.h"

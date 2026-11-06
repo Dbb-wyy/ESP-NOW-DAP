@@ -1,0 +1,4 @@
+[mapping:usb_device]
+archive: libusb_device.a
+entries:
+    eub_vendord (noflash)

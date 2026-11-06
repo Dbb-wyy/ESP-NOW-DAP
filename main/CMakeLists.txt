@@ -1,37 +1,11 @@
 set(srcs
     "main.c"
     "bridge_glue.c"
-    "eub_abort.c"
 )
 
-set(dependencies "esp_timer" "status_led" "target_uart" "debug_probe" "esp_ringbuf")
-
-# The USB device stack (tinyusb + vendor bulk + CDC) only exists on the PC-facing
-# roles, wired and wireless host. The wireless slave has no USB at all, which is
-# what lets it build for targets without a USB OTG controller (ESP32-C3/C6).
-#
-# Which sources are compiled is decided by the role; the requirement on tinyusb/usb
-# is decided by the target. The two cannot use the same condition: component
-# requirements are collected by an early CMake expansion pass
-# (tools/cmake/scripts/component_get_requirements.cmake) that runs *before* the
-# sdkconfig is generated and imported, so CONFIG_* values are still empty there. A
-# role check would therefore look like "not the slave" on every build and require
-# tinyusb on C3/C6 as well, where the component manager never provides it (see the
-# target rule in idf_component.yml) -> "Failed to resolve component 'tinyusb'
-# required by component 'main': unknown name". Sources are only collected when the
-# component is really built, so a role check is correct (and visible) for them.
-set(bridge_usb_stack FALSE)
-if(IDF_TARGET STREQUAL "esp32s2" OR IDF_TARGET STREQUAL "esp32s3")
-    set(bridge_usb_stack TRUE)
-endif()
-
-if(NOT CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE)
-    list(APPEND srcs "eub_vendord.c" "serial_bridge.c" "usb_phy.c")
-endif()
-
-if(bridge_usb_stack)
-    list(APPEND dependencies "tinyusb" "usb")
-endif()
+# usb_device is present on every target: on C3/C6 it contributes no sources and
+# nothing in main/ references its API (those builds are the wireless slave).
+set(dependencies "esp_timer" "status_led" "target_uart" "debug_probe" "usb_device" "esp_ringbuf")
 
 if(NOT CONFIG_BRIDGE_ROLE_WIRED)
     list(APPEND dependencies "wireless_link")
@@ -44,54 +18,6 @@ else()
     list(APPEND dependencies "driver")
 endif()
 
-# noflash.lf only places eub_vendord in IRAM; that object is not built for the slave.
-set(ldfragments)
-if(NOT CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE)
-    set(ldfragments "noflash.lf")
-endif()
-
 idf_component_register(SRCS ${srcs}
                        REQUIRES ${dependencies}
-                       LDFRAGMENTS ${ldfragments}
-                       INCLUDE_DIRS "." "public_include")
-
-# main/public_include/tusb_config.h is tinyusb's configuration header. tinyusb is
-# pulled in by idf_component.yml for USB-capable targets only (S2/S3), and the
-# component manager resolves that per TARGET, not per role: on S3 the component is
-# part of every build, including the wireless slave one. Whenever it is present it
-# must be able to find this header, so the include path is added regardless of the
-# role. The slave build has no USB code of its own and nothing references tinyusb,
-# so the library is built but never linked into the image.
-idf_build_get_property(build_components BUILD_COMPONENTS)
-if("espressif__tinyusb" IN_LIST build_components)
-    idf_component_get_property(tusb_lib espressif__tinyusb COMPONENT_LIB)
-    target_include_directories(${tusb_lib} PRIVATE public_include)
-endif()
-
-idf_build_get_property(project_ver PROJECT_VER)
-if(project_ver)
-    message(STATUS "Project version: '${project_ver}'")
-    # Once a git tag is created, PROJECT_VER will look like v1.2-4-g567890a, assuming
-    # that we use tags in `vX.Y` format. Extract X and Y from the tag:
-    string(REGEX MATCH "^v([0-9]+)\\.([0-9]+)[^.]*$" match ${project_ver})
-    if(match)
-        set(project_ver_major ${CMAKE_MATCH_1})
-        set(project_ver_minor ${CMAKE_MATCH_2})
-        # extend project_ver_minor to two BCD digits
-        string(LENGTH ${project_ver_minor} len)
-        if(len EQUAL 1)
-            set(project_ver_minor "0${project_ver_minor}")
-        endif()
-        set(bcd_device "0x${project_ver_major}${project_ver_minor}")
-    else()
-        message(STATUS "Failed to determine major and minor version from '${project_ver}'")
-    endif()
-endif()
-
-# Otherwise, set the version to 0.01
-if(NOT bcd_device)
-    set(bcd_device "0x0001")
-endif()
-message(STATUS "bcdDevice value: ${bcd_device}")
-
-target_compile_definitions(${COMPONENT_LIB} PRIVATE BCDDEVICE=${bcd_device})
+                       INCLUDE_DIRS ".")

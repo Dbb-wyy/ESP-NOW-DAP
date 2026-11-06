@@ -14,9 +14,9 @@
 #include "esp_timer.h"
 
 #include "eub_vendord.h"
-#include "bridge_glue.h"
 #include "usb_defs.h"
 #include "eub_abort.h"
+#include "usb_device_priv.h"
 
 static const char *TAG = "eub_vendor";
 #define USB_BUSY_TOUT_US    100000 /* 100ms */
@@ -149,12 +149,17 @@ bool tud_vendor_control_xfer_cb(const uint8_t rhport, const uint8_t stage, tusb_
         case VENDOR_REQUEST_MICROSOFT:
             return tud_control_xfer(rhport, request, (void *)(uintptr_t)desc_ms_os_20, MS_OS_20_DESC_LEN);
         default:
+            const usb_device_ops_t *ops = usb_device_get_ops();
+            if (ops == NULL || ops->probe_handle_command == NULL) {
+                return false;
+            }
+
             const uint8_t *response_data = NULL;
             size_t response_len = 0;
-            esp_err_t err = bridge_probe_handle_command(request->bRequest,
-                                                        request->wValue,
-                                                        &response_data,
-                                                        &response_len);
+            esp_err_t err = ops->probe_handle_command(request->bRequest,
+                                                      request->wValue,
+                                                      &response_data,
+                                                      &response_len);
             if (err != ESP_OK) {
                 return false;
             }
@@ -199,7 +204,10 @@ static bool eub_vendord_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t r
         /* nothing to do for now */
         return true;
     } else if (ep_dir == TUSB_DIR_OUT) {
-        esp_err_t process_result = bridge_probe_process_data(s_eub_vendord_itf.epout_buf, xferred_bytes);
+        const usb_device_ops_t *ops = usb_device_get_ops();
+        esp_err_t process_result = (ops != NULL && ops->probe_process_data != NULL)
+                                   ? ops->probe_process_data(s_eub_vendord_itf.epout_buf, xferred_bytes)
+                                   : ESP_ERR_INVALID_STATE;
         if (process_result != ESP_OK) {
             ESP_LOGW(TAG, "Debug probe failed to process data: %s", esp_err_to_name(process_result));
             eub_abort();
@@ -224,14 +232,20 @@ static void usb_send_task(void *pvParameters)
     ESP_LOGI(TAG, "usb_send_task is ready!");
 
     for (;;) {
-        uint8_t *buf_copy = bridge_probe_get_data_to_send(&total_bytes, portMAX_DELAY);
+        const usb_device_ops_t *ops = usb_device_get_ops();
+        if (ops == NULL || ops->probe_get_data_to_send == NULL) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
+        }
+
+        uint8_t *buf_copy = ops->probe_get_data_to_send(&total_bytes, portMAX_DELAY);
 
         if (!eub_endpt_transfer(s_rhport, s_eub_vendord_itf.ep_in, buf_copy, total_bytes)) {
             ESP_LOGE(TAG, "USB transfer error on EP:%x", s_eub_vendord_itf.ep_in);
             eub_abort();
         }
 
-        bridge_probe_free_sent_data(buf_copy);
+        ops->probe_free_sent_data(buf_copy);
     }
 
     vTaskDelete(NULL);

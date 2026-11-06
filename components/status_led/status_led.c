@@ -333,7 +333,7 @@ static void led_apply_status(led_status_t status, uint32_t now) {
 /*
  * Answers one question and changes nothing: what state is the bridge in now?
  * The link is pulled, never latched here, so an unregistered source (the few
- * milliseconds between status_led_init() and bridge_uplink_init(), or a failed
+ * milliseconds between status_led_init() and bridge_init(), or a failed
  * wlink_init()) reports "down" rather than pretending the link is fine. A local
  * (wired) bridge has no link at all and is treated as always linked.
  */

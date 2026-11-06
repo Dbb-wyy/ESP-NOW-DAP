@@ -7,7 +7,8 @@
 #pragma once
 
 /*
- * Phase 4 (B2): the CDC to target-serial bridge moves to components/usb_device.
+ * CDC -> target-serial bridge and target -> CDC ring buffer. Private to
+ * components/usb_device.
  */
 
 #include <stdbool.h>
@@ -29,8 +30,8 @@ esp_err_t serial_bridge_init(void);
 /**
  * @brief Feed data coming from the target into the USB CDC IN endpoint.
  *
- * Called by the transport glue: from the local UART event task in wired mode and
- * from the ESP-NOW receive callback in wireless host mode.
+ * Called from usb_device_target_data_received(), which the bridge transport
+ * (local target UART in wired mode, ESP-NOW in wireless host mode) feeds.
  *
  * @param data Received data
  * @param len  Data length

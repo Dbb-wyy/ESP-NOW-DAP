@@ -7,7 +7,8 @@
 #pragma once
 
 /*
- * Phase 4 (B2): the interface and endpoint numbering moves to components/usb_device.
+ * Interface and endpoint numbering of the composite device. Private to
+ * components/usb_device.
  */
 
 #include "sdkconfig.h"

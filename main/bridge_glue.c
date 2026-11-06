@@ -20,9 +20,12 @@
 
 #include "bridge_glue.h"
 #include "debug_probe.h"
-#include "serial_bridge.h"
 #include "target_uart.h"
 #include "status_led.h"
+
+#if !CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE
+#include "usb_device.h"
+#endif
 
 #if !CONFIG_BRIDGE_ROLE_WIRED
 #include "wireless_link.h"
@@ -166,7 +169,7 @@ static void bridge_on_uart_data(const uint8_t *data, size_t len)
 #if CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE
     wlink_send(WLINK_CHANNEL_SERIAL, 0, 0, data, len);
 #else
-    serial_bridge_target_data_received(data, len);
+    usb_device_target_data_received(data, len);
 #endif
 }
 
@@ -464,7 +467,7 @@ static void bridge_on_link_sercmd(wlink_channel_t channel, uint8_t sub, uint8_t 
 
 esp_err_t bridge_wireless_slave_start(void)
 {
-    esp_err_t err = bridge_uplink_init();
+    esp_err_t err = bridge_init();
     if (err != ESP_OK) {
         return err;
     }
@@ -474,7 +477,7 @@ esp_err_t bridge_wireless_slave_start(void)
         return err;
     }
 
-    /* The request queue is created by bridge_uplink_init() right before it registers the
+    /* The request queue is created by bridge_init() right before it registers the
        receive callback, so it cannot be missing here. */
 
     /* The DAP engine touches dedicated GPIO, which is CPU local, so keep both tasks
@@ -626,7 +629,7 @@ static void bridge_on_link_serial(wlink_channel_t channel, uint8_t sub, uint8_t 
     status_led_notify_activity(STATUS_LED_ACT_SERIAL);
 
 #if CONFIG_BRIDGE_ROLE_WIRELESS_HOST
-    serial_bridge_target_data_received(payload, len);
+    usb_device_target_data_received(payload, len);
 #else
     target_uart_send(payload, len);
 #endif
@@ -646,8 +649,35 @@ static const status_led_link_ops_t k_led_link_ops = {
 
 /* ==================================================================== serial uplink */
 
-esp_err_t bridge_uplink_init(void)
+#if !CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE
+/*
+ * The USB device side knows nothing about the roles: it calls back into this table.
+ * Wired and wireless host differ only in what serial_send/set_baudrate/set_line_state
+ * do; the probe callbacks are the same entry points the vendor bulk path uses.
+ */
+static const usb_device_ops_t k_bridge_usb_ops = {
+    .serial_send = bridge_serial_send,
+    .serial_set_baudrate = bridge_serial_set_baudrate,
+    .serial_set_line_state = bridge_serial_set_line_state,
+    .probe_init = bridge_probe_init,
+    .probe_process_data = bridge_probe_process_data,
+    .probe_get_data_to_send = bridge_probe_get_data_to_send,
+    .probe_free_sent_data = bridge_probe_free_sent_data,
+    .probe_handle_command = bridge_probe_handle_command,
+    .probe_get_proto_caps = bridge_probe_get_proto_caps,
+    .probe_handle_esp32_tdi_bootstrapping = bridge_probe_handle_esp32_tdi_bootstrapping,
+};
+#endif
+
+esp_err_t bridge_init(void)
 {
+#if !CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE
+    esp_err_t usb_err = usb_device_register_ops(&k_bridge_usb_ops);
+    if (usb_err != ESP_OK) {
+        return usb_err;
+    }
+#endif
+
 #if CONFIG_BRIDGE_ROLE_WIRED
     /* No link to report: the LED breathes white while the bridge idles. */
     status_led_set_local(true);

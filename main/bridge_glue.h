@@ -40,12 +40,13 @@ extern "C" {
 /* ------------------------------------------------------------------ serial uplink */
 
 /**
- * @brief Initialise the serial uplink for the current role.
+ * @brief Initialise the bridge for the current role.
  *
- * WIRED/SLAVE: install the target UART through the serial handler.
+ * WIRED/SLAVE: install the target UART.
  * WIRELESS_*: initialise the ESP-NOW link and register the serial handlers.
+ * USB builds: register the usb_device callbacks before the host is attached.
  */
-esp_err_t bridge_uplink_init(void);
+esp_err_t bridge_init(void);
 
 /**
  * @brief Send data towards the target (called from the USB CDC receive path).

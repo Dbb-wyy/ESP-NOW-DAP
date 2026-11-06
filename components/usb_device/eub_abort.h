@@ -11,8 +11,8 @@
  *
  * The bridge has no user interface to report a fault through, so the only record is
  * the log line the caller prints right before giving up; eub_abort() just stops the
- * image. It lives in main/ because every caller is here - it used to sit in a
- * "util" component that otherwise held nothing but the status LED driver.
+ * image. Every caller lives in components/usb_device, so the helper moved here with
+ * the USB stack.
  */
 
 #define GET_BYTE(n, b)  (((n) >> ((b) * 8)) & 0xFF)

@@ -12,13 +12,6 @@
 #include <freertos/FreeRTOS.h>
 #include "esp_err.h"
 
-/* Be careful if you want to change the index. It must be bigger then the size of string_desc_arr
-   For now 7 would be also ok. But lets reserve some fields for the future additions
-   Also it must be match with the value in the openocd/esp_usb_bridge.cfg file
-   Currently it is defined as < esp_usb_jtag_caps_descriptor 0x030A >
-*/
-#define DEBUG_PROBE_STR_DESC_INX    0x0A
-
 // Maximum packet size for the debug probe command and response data.
 // Typical vales are 64 for Full-speed USB HID or WinUSB,
 // 1024 for High-speed USB HID and 512 for High-speed USB WinUSB.

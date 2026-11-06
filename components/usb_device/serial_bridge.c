@@ -18,8 +18,8 @@
 #include "freertos/semphr.h"
 #include "sdkconfig.h"
 #include "eub_abort.h"
-#include "bridge_glue.h"
 #include "status_led.h"
+#include "usb_device_priv.h"
 #include "usb_phy.h"
 #include "soc/rtc_cntl_reg.h"
 
@@ -47,8 +47,8 @@ void serial_bridge_target_data_received(const uint8_t *data, size_t len)
     status_led_notify_activity(STATUS_LED_ACT_SERIAL);
 
     /*
-     * bridge_uplink_init() registers the transport receive callback (and, on the
-     * wired and wireless slave roles, starts the UART event task) before
+     * bridge_init() registers the transport receive callback (and, on the wired
+     * and wireless slave roles, starts the UART event task) before
      * serial_bridge_init() creates this ring buffer, so a target that is already
      * talking can get here first. Dropping those first bytes is preferable to
      * dereferencing a NULL handle, and it keeps the initialisation order in main.c
@@ -139,7 +139,11 @@ void tud_cdc_rx_cb(const uint8_t itf)
 
         /* Wired mode: straight to the target UART.
            Wireless host mode: tunnelled to the slave over ESP-NOW. */
-        bridge_serial_send(buf, rx_size);
+        const usb_device_ops_t *ops = usb_device_get_ops();
+        if (ops == NULL || ops->serial_send == NULL) {
+            return;
+        }
+        ops->serial_send(buf, rx_size);
     } else {
         ESP_LOGW(TAG, "tud_cdc_rx_cb receive error");
     }
@@ -161,7 +165,11 @@ void tud_cdc_line_coding_cb(const uint8_t itf, cdc_line_coding_t const *p_line_c
     }
 
     download_mode_armed = false;
-    if (bridge_serial_set_baudrate(p_line_coding->bit_rate) != ESP_OK) {
+    const usb_device_ops_t *ops = usb_device_get_ops();
+    if (ops == NULL || ops->serial_set_baudrate == NULL) {
+        return;
+    }
+    if (ops->serial_set_baudrate(p_line_coding->bit_rate) != ESP_OK) {
         ESP_LOGE(TAG, "Could not set the baudrate to %" PRIu32, p_line_coding->bit_rate);
         eub_abort();
     }
@@ -177,7 +185,11 @@ void tud_cdc_line_state_cb(const uint8_t itf, const bool dtr, const bool rts)
 
     /* In wired mode this drives the target BOOT/RST pins directly, in wireless host
        mode the levels are forwarded to the slave, which owns those pins. */
-    if (bridge_serial_set_line_state(dtr, rts) != ESP_OK) {
+    const usb_device_ops_t *ops = usb_device_get_ops();
+    if (ops == NULL || ops->serial_set_line_state == NULL) {
+        return;
+    }
+    if (ops->serial_set_line_state(dtr, rts) != ESP_OK) {
         ESP_LOGE(TAG, "Cannot apply DTR = %d, RTS = %d", dtr, rts);
         eub_abort();
     }
@@ -214,7 +226,7 @@ esp_err_t serial_bridge_init(void)
         return ESP_ERR_NO_MEM;
     }
 
-    // The transport that feeds this bridge is registered by bridge_uplink_init().
+    // The transport that feeds this bridge is registered by bridge_init().
 
     // Start USB sender task
     xTaskCreate(usb_sender_task, "usb_sender_task", 4 * 1024, NULL, USB_SENDER_TASK_PRI, NULL);
