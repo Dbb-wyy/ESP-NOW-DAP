@@ -20,16 +20,6 @@ build_r_*/
 sdkconfig.r_*
 build_r_*.log
 
-# CI configuration and personal tool config are kept on disk but intentionally
-# untracked: the workflows referenced Espressif's internal Jira/Launchpad/danger
-# infrastructure and do not apply to this fork.
-.github/
-.gitlab-ci.yml
-
-
-# Old repository history (kept on disk, not tracked)
-.cz.toml
-
 # My Editor settings (kept on disk, not tracked)
 .clangd
 .vscode/

@@ -240,12 +240,7 @@ wired 角色同样支持状态灯（默认随 `sdkconfig.defaults.esp32s3` 用 G
 
 提交 pull request 时请遵循 ESP-IDF 项目的[贡献指南](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/contribute/index.html)。
 
-另外请在提交代码前安装 [pre-commit](https://pre-commit.com/#install) 钩子：
-
-```bash
-pip install pre-commit
-pre-commit install
-```
+本仓库没有 CI / pre-commit 门禁；提交前请至少跑通 `esp-idf-build` 技能里的五个构建组合（wired、host、slave_s3、slave_c6、slave_c3），涉及行为变化的改动再按 `esp-idf-flash` 技能上板冒烟。
 
 ---
 
@@ -499,9 +494,4 @@ issue tracker.
 
 Contributions in the form of pull requests should follow ESP-IDF project's [contribution guidelines](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/contribute/index.html).
 
-Additionally please install [pre-commit](https://pre-commit.com/#install) hooks before committing code:
-
-```bash
-pip install pre-commit
-pre-commit install
-```
+This repository has no CI / pre-commit gate. Before committing, at least build all five combinations covered by the `esp-idf-build` skill (wired, host, slave_s3, slave_c6, slave_c3); for behaviour changes, also smoke-test on hardware via the `esp-idf-flash` skill.
