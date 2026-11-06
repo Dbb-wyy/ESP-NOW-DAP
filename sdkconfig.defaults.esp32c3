@@ -37,7 +37,7 @@ CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
 #     (debugger disconnect) calls gpio_reset_pin() on them, so a disconnect also resets
 #     SWDIO. That is harmless: PORT_SWD_SETUP re-initialises both SWD pins on the next
 #     connect (same class of issue as the C6 TDO/RST overlap in .agent/Todo.md T6).
-#   * GPIO2 is one of the three strapping pins and carries RXD. serial_handler only
+#   * GPIO2 is one of the three strapping pins and carries RXD. target_uart only
 #     enables the internal pull-up on it (UART idle = mark = high), which matches the
 #     level the ROM samples by default; do not attach anything that pulls it low at reset.
 CONFIG_DEBUG_PROBE_IFACE_SWD=y
@@ -49,10 +49,10 @@ CONFIG_DEBUG_PROBE_GPIO_TMS=3
 # BOOT/RST sit on GPIO6/GPIO7 (the two remaining built-in JTAG pins): the user does not
 # wire them for now, and putting them here keeps UART0's pads and the strapping pins out
 # of the way. Both are open-drain with a pull-up, so they idle high at reset.
-CONFIG_SERIAL_HANDLER_GPIO_TXD=1
-CONFIG_SERIAL_HANDLER_GPIO_RXD=2
-CONFIG_SERIAL_HANDLER_GPIO_BOOT=6
-CONFIG_SERIAL_HANDLER_GPIO_RST=7
+CONFIG_TARGET_UART_GPIO_TXD=1
+CONFIG_TARGET_UART_GPIO_RXD=2
+CONFIG_TARGET_UART_GPIO_BOOT=6
+CONFIG_TARGET_UART_GPIO_RST=7
 
 # Status LED: off by default. This board exposes no WS2812, and a wrong pin guess on a
 # C3 is expensive (GPIO11 is VDD_SPI, GPIO12..17 are the in-package flash). Turn it on

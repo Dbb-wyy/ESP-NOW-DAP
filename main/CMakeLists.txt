@@ -4,7 +4,7 @@ set(srcs
     "eub_abort.c"
 )
 
-set(dependencies "esp_timer" "status_led" "serial_handler" "debug_probe" "esp_ringbuf")
+set(dependencies "esp_timer" "status_led" "target_uart" "debug_probe" "esp_ringbuf")
 
 # The USB device stack (tinyusb + vendor bulk + CDC) only exists on the PC-facing
 # roles, wired and wireless host. The wireless slave has no USB at all, which is

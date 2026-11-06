@@ -221,7 +221,7 @@ relay adds a small amount of protocol on top of the link.
   as `SERIAL_CMD` frames rather than applied locally.
 * **Slave**: link `SERIAL` frames go to `uart_write_bytes`, and the UART event
   task forwards target data back over the link. `SERIAL_CMD` frames are applied
-  locally: baud rate via `serial_handler_set_baudrate()`, and DTR/RTS through the
+  locally: baud rate via `target_uart_set_baudrate()`, and DTR/RTS through the
   normal BOOT/RST mapping in `bridge_apply_line_state()`.
 
 The DTR/RTS → BOOT/RST transformation (including the esptool timing patch and the
@@ -247,7 +247,7 @@ link: baud rate changes and the reset dance are tunneled transparently.
 | `CONFIG_BRIDGE_LED_SESSION_TIMEOUT_MS` | ditto | blue SWD state is opened by DAP Connect; 0 = only Disconnect closes it |
 | `CONFIG_BRIDGE_LED_GAMMA_X100` | ditto | breathing curve, 220 = gamma 2.2, 100 = linear |
 | `CONFIG_DEBUG_PROBE_GPIO_TCK/TMS` | `sdkconfig.defaults.esp32s3` | SWCLK / SWDIO |
-| `CONFIG_SERIAL_HANDLER_GPIO_*` | `sdkconfig.defaults.esp32s3` | target UART + BOOT/RST |
+| `CONFIG_TARGET_UART_GPIO_*` | `sdkconfig.defaults.esp32s3` | target UART + BOOT/RST |
 
 Board settings live in `sdkconfig.defaults.esp32s3`, so all three role builds and
 a plain `idf.py build` use the same pins, flash size and USB identity. The two other

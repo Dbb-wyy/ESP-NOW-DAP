@@ -22,10 +22,10 @@ CONFIG_DEBUG_PROBE_GPIO_TMS=5
 
 # Target UART and reset lines. BOOT sits on GPIO10, not GPIO8: GPIO8 is the
 # addressable RGB LED of the devkit and is used by the status LED below.
-CONFIG_SERIAL_HANDLER_GPIO_BOOT=10
-CONFIG_SERIAL_HANDLER_GPIO_RST=9
-CONFIG_SERIAL_HANDLER_GPIO_RXD=6
-CONFIG_SERIAL_HANDLER_GPIO_TXD=7
+CONFIG_TARGET_UART_GPIO_BOOT=10
+CONFIG_TARGET_UART_GPIO_RST=9
+CONFIG_TARGET_UART_GPIO_RXD=6
+CONFIG_TARGET_UART_GPIO_TXD=7
 
 # Pin map above is the one that was verified on the actual C6 slave board during
 # stage 3 (SWCLK=4, SWDIO=5, target TXD=7, target RXD=6, RST=9); BOOT moved from

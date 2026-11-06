@@ -7,6 +7,6 @@ else()
     list(APPEND priv_requires "driver")
 endif()
 
-idf_component_register(SRCS "serial_handler.c"
+idf_component_register(SRCS "target_uart.c"
                     INCLUDE_DIRS "include"
                     PRIV_REQUIRES ${priv_requires})

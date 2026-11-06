@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include "esp_err.h"
 
 #ifdef __cplusplus
@@ -20,22 +21,22 @@ extern "C" {
  * @param data Received data buffer
  * @param len Length of received data
  */
-typedef void (*transport_data_received_cb_t)(const uint8_t *data, size_t len);
+typedef void (*target_uart_rx_cb_t)(const uint8_t *data, size_t len);
 
 /**
- * @brief Register callback for received data
+ * @brief Register the callback for data received from the target UART.
  *
  * @param callback Callback function to call when data is received
  * @return esp_err_t ESP_OK on success
  */
-esp_err_t serial_handler_register_data_callback(transport_data_received_cb_t callback);
+esp_err_t target_uart_register_rx_cb(target_uart_rx_cb_t callback);
 
 /**
- * @brief Initialize the serial comm handler (UART to the target).
+ * @brief Initialize the target UART and the BOOT/RESET lines.
  *
  * @return esp_err_t ESP_OK on success
  */
-esp_err_t serial_handler_init(void);
+esp_err_t target_uart_init(void);
 
 /**
  * @brief Send data to the target UART.
@@ -44,7 +45,7 @@ esp_err_t serial_handler_init(void);
  * @param len Length of data
  * @return esp_err_t ESP_OK on success
  */
-esp_err_t serial_handler_send_data(const uint8_t *data, size_t len);
+esp_err_t target_uart_send(const uint8_t *data, size_t len);
 
 /**
  * @brief Set the target UART baudrate.
@@ -52,7 +53,7 @@ esp_err_t serial_handler_send_data(const uint8_t *data, size_t len);
  * @param baud New baudrate
  * @return esp_err_t ESP_OK on success
  */
-esp_err_t serial_handler_set_baudrate(uint32_t baud);
+esp_err_t target_uart_set_baudrate(uint32_t baud);
 
 /**
  * @brief Set target boot and reset pin levels
@@ -63,7 +64,7 @@ esp_err_t serial_handler_set_baudrate(uint32_t baud);
  * @param boot_pin true to set boot pin HIGH, false to set it LOW
  * @param reset_pin true to set reset pin HIGH, false to set it LOW
  */
-void serial_handler_set_boot_reset_pins(bool boot_pin, bool reset_pin);
+void target_uart_set_boot_reset_pins(bool boot_pin, bool reset_pin);
 
 #ifdef __cplusplus
 }

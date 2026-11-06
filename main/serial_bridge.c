@@ -19,13 +19,12 @@
 #include "sdkconfig.h"
 #include "eub_abort.h"
 #include "bridge_glue.h"
-#include "serial_handler.h"
 #include "status_led.h"
 #include "usb_phy.h"
 #include "soc/rtc_cntl_reg.h"
 
 #define USB_SEND_RINGBUFFER_SIZE (2 * 1024)
-/* Same numeric priority as the UART event task of serial_handler: the sender and
+/* Same numeric priority as the UART event task of target_uart: the sender and
  * the UART consumer advance the same byte stream, they must not preempt each other. */
 #define USB_SENDER_TASK_PRI 5
 /* tud_cdc_n_get_line_state(): bit 0 = DTR, bit 1 = RTS */

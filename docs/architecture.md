@@ -130,6 +130,8 @@ stub file exists. Only `wireless_slave` builds are supported there; `bridge` onl
 
 - `target_uart_init()`, `target_uart_send()`, `target_uart_set_baudrate()`,
   `target_uart_set_boot_reset_pins(bool boot, bool reset)`, `target_uart_register_rx_cb()`.
+- Its pin configuration symbols are `CONFIG_TARGET_UART_GPIO_{BOOT,RST,RXD,TXD}`; per-chip
+  defaults live in `sdkconfig.defaults.esp32*`.
 - It does not interpret DTR/RTS, does not call `debug_probe` and does not know about USB.
 - The DTR/RTS -> BOOT/RST mapping (including the TDI bootstrapping hook and the 115200 baud
   restore) lives in `bridge`, so the body components stay independent (R-3). The orchestration

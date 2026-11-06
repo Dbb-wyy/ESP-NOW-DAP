@@ -21,7 +21,7 @@
 #include "bridge_glue.h"
 #include "debug_probe.h"
 #include "serial_bridge.h"
-#include "serial_handler.h"
+#include "target_uart.h"
 #include "status_led.h"
 
 #if !CONFIG_BRIDGE_ROLE_WIRED
@@ -81,7 +81,7 @@ static esp_timer_handle_t s_state_change_timer;
 static void bridge_state_change_timer_cb(void *arg)
 {
     ESP_LOGI(TAG, "BOOT = 1, RST = 1");
-    serial_handler_set_boot_reset_pins(true, true);
+    target_uart_set_boot_reset_pins(true, true);
 }
 
 static esp_err_t bridge_init_state_change_timer(void)
@@ -97,40 +97,53 @@ static esp_err_t bridge_init_state_change_timer(void)
     return esp_timer_create(&timer_args, &s_state_change_timer);
 }
 
-static esp_err_t bridge_apply_line_state(bool dtr, bool rts)
+/* Pure mapping, no I/O: the DTR/RTS to BOOT/RST transformation follows the auto reset
+   circuitry of the ESP development boards, see the ESP USB Bridge schematics. */
+static void bridge_line_state_map(bool dtr, bool rts, bool *boot, bool *rst)
 {
-    /* The DTR/RTS to BOOT/RST transformation follows the auto reset circuitry of the
-       ESP development boards, see the ESP USB Bridge schematics. */
-
     /* defaults for ((dtr && rts) || (!dtr && !rts)) */
-    bool rst = true;
-    bool boot = true;
+    *rst = true;
+    *boot = true;
 
     if (!dtr && rts) {
-        rst = false;
-        boot = true;
+        *rst = false;
+        *boot = true;
     } else if (dtr && !rts) {
-        rst = true;
-        boot = false;
+        *rst = true;
+        *boot = false;
     }
+}
 
+/* Postpone the BOOT=1/RST=1 assignment until no other state change happens in the
+   meantime. This is a patch for esptool, which emits DTR=0 & RTS=1 followed by
+   DTR=1 & RTS=0 with a temporary DTR=1 & RTS=1 in between. */
+static esp_err_t bridge_line_state_defer_defaults(void)
+{
+    ESP_ERROR_CHECK(esp_timer_start_once(s_state_change_timer, 10 * 1000 /*us*/));
+    return ESP_OK;
+}
+
+/* Orchestration: stop the pending deferral, map, drive the pins, then restore the
+   default baudrate and hold TDI low while the target leaves reset. */
+static esp_err_t bridge_apply_line_state(bool dtr, bool rts)
+{
     esp_timer_stop(s_state_change_timer);  /* may not be running, the return value is not interesting */
 
     if (dtr && rts) {
-        /* The assignment of BOOT=1 and RST=1 is postponed and only done if no other state
-           change happens in the meantime. This is a patch for esptool, which emits
-           DTR=0 & RTS=1 followed by DTR=1 & RTS=0 with a temporary DTR=1 & RTS=1 in between. */
-        ESP_ERROR_CHECK(esp_timer_start_once(s_state_change_timer, 10 * 1000 /*us*/));
-        return ESP_OK;
+        return bridge_line_state_defer_defaults();
     }
+
+    bool boot;
+    bool rst;
+    bridge_line_state_map(dtr, rts, &boot, &rst);
 
     ESP_LOGI(TAG, "DTR = %d, RTS = %d -> BOOT = %d, RST = %d", dtr, rts, boot, rst);
 
-    serial_handler_set_boot_reset_pins(boot, rst);
+    target_uart_set_boot_reset_pins(boot, rst);
 
     if (!rst) {
         const uint32_t default_baud = 115200;
-        esp_err_t err = serial_handler_set_baudrate(default_baud);
+        esp_err_t err = target_uart_set_baudrate(default_baud);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Cannot restore the default baudrate: %s", esp_err_to_name(err));
             return err;
@@ -440,7 +453,7 @@ static void bridge_on_link_sercmd(wlink_channel_t channel, uint8_t sub, uint8_t 
     if (sub == BRIDGE_SERCMD_LINE_CODING && len >= sizeof(uint32_t)) {
         uint32_t baud = 0;
         memcpy(&baud, payload, sizeof(baud));
-        if (serial_handler_set_baudrate(baud) != ESP_OK) {
+        if (target_uart_set_baudrate(baud) != ESP_OK) {
             ESP_LOGW(TAG, "Remote baudrate %" PRIu32 " rejected", baud);
         }
     } else if (sub == BRIDGE_SERCMD_LINE_STATE && len >= 2) {
@@ -615,7 +628,7 @@ static void bridge_on_link_serial(wlink_channel_t channel, uint8_t sub, uint8_t 
 #if CONFIG_BRIDGE_ROLE_WIRELESS_HOST
     serial_bridge_target_data_received(payload, len);
 #else
-    serial_handler_send_data(payload, len);
+    target_uart_send(payload, len);
 #endif
 }
 
@@ -644,13 +657,13 @@ esp_err_t bridge_uplink_init(void)
         return err;
     }
 
-    err = serial_handler_init();
+    err = target_uart_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "UART transport init failed: %s", esp_err_to_name(err));
         return err;
     }
 
-    err = serial_handler_register_data_callback(bridge_on_uart_data);
+    err = target_uart_register_rx_cb(bridge_on_uart_data);
     if (err != ESP_OK) {
         return err;
     }
@@ -709,13 +722,13 @@ esp_err_t bridge_uplink_init(void)
         return err;
     }
 
-    err = serial_handler_init();
+    err = target_uart_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "UART transport init failed: %s", esp_err_to_name(err));
         return err;
     }
 
-    return serial_handler_register_data_callback(bridge_on_uart_data);
+    return target_uart_register_rx_cb(bridge_on_uart_data);
  #endif
 #endif
 }
@@ -731,7 +744,7 @@ esp_err_t bridge_serial_send(const uint8_t *data, size_t len)
     }
     return wlink_send(WLINK_CHANNEL_SERIAL, 0, 0, data, len);
 #else
-    return serial_handler_send_data(data, len);
+    return target_uart_send(data, len);
 #endif
 }
 
@@ -747,7 +760,7 @@ esp_err_t bridge_serial_set_baudrate(uint32_t baud)
     }
     return wlink_send(WLINK_CHANNEL_SERIAL_CMD, BRIDGE_SERCMD_LINE_CODING, 0, payload, sizeof(payload));
 #else
-    return serial_handler_set_baudrate(baud);
+    return target_uart_set_baudrate(baud);
 #endif
 }
 
