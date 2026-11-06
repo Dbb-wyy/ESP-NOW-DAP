@@ -574,6 +574,13 @@ def main() -> int:
         return 0
 
     if args.all or args.pair:
+        if args.port or args.variant:
+            # Silence here would let someone believe the run was pinned to one board.
+            print(
+                "note: --all/--pair flash every mapped board that is plugged in; "
+                "--port and --variant are ignored.",
+                file=sys.stderr,
+            )
         return run_batch(args, devices, load_map())
 
     wanted = Path(args.port) if args.port else None
