@@ -91,17 +91,34 @@
 | B6 | F407 `flash write_image erase` + `reset init` | 8/10 成功，写 median **14.481** KiB/s，WALL median **5.21 s** | `/tmp/f407w_*.log` |
 | B7 | 无线烧录挂死率 | **15%（3/20）**；形态固定（`Programming Started` 之后永久挂起），两侧证据齐全 | `/tmp/f407w_console.log`、`/tmp/s3_console_during_program.log`、`/tmp/c6_console_during_hang2.log` |
 | B8 | 烧录端到端（F407） | 55,152 B / 5.14 s ≈ **10.6 KiB/s**（含擦除+校验+复位） | 由 B6 派生 |
+| B9 | 请求往返 RTT（T1.1 `bench.py rtt`，n=30，`mdw` 单字读 @2000 kHz） | min **1934** / p50 **2541.5** / mean 3101.5 / p95 5646 / max 7265 µs | `perf_out/20261106-224619-rtt.{json,md}` |
+| B10 | 批量读 `dump_image` 32 KiB @2000 kHz（`bench.py bulk-read`，n=5） | min **8.145** / p50 **13.798** / mean 15.196 / max 21.151 KiB/s | `perf_out/20261106-224635-bulk-read.{json,md}` |
+| B11 | 批量写 RAM `load_image` 32 KiB @2000 kHz（`bench.py bulk-write-ram`，n=5） | min **21.725** / p50 **23.385** / mean 23.226 / max 24.304 KiB/s；1 次挂死被重试救回 | `perf_out/20261106-224956-bulk-write-ram.{json,md}` |
+| B12 | 烧录端到端（`bench.py flash-program`，T1.1） | **未取得**：本轮 8/8 次尝试全部 `hang_during_program`（3 次 @2000 kHz、5 次 @500 kHz，wall≈50 s 被外部 kill）；单会话手测 100/500/2000 kHz 均挂 | `perf_out/20261106-230410-flash-program.{json,md}`、`/tmp/bench_flash500.log` |
+
+**B12 的成因（已定位，属产品缺陷而非工具问题）**：`flash erase_sector` 1.5 s 成功、`flash write_image` 1 KB 成功（0.16 s / 6.181 KiB/s），但 55 KB 图像必定挂在 flash 异步算法的 16 KB 工作区阶段；同刻 S3 控制台恰好一条 `W bridge: DAP request seq 89 was not answered after 3 attempts, link is paired`，C6 侧仅 `debug_gpio: SWD GPIO init done`。即链路丢/迟一次 DAP 事务后，host relay 放弃重试只打日志、不向 USB 侧交付失败（`components/bridge/bridge_host.c:137-143`），USB 侧 `usb_send_task` 阻塞 `portMAX_DELAY`（`components/usb_device/eub_vendord.c:210`），openocd 无超时 → 永久挂起（= B7 的同一缺陷，见 `.agent/Plan_v3.md` §1.3 缺陷 1）。
+
+排除项（本轮都试过，无效）：SWD 时钟 100 / 500 / 2000 kHz；复位 C6（RTS）；`FLASH_SR` 清零 + 解锁；`reset halt` 前置；换 `program` / `flash write_image erase` 两种路径。
+
+另记一条环境坑：被 kill 的 openocd **不响应 SIGTERM**，残留进程会占住 CMSIS-DAP 的 USB 节点（`usbfs: process … did not claim interface 2 before use`、`Input/Output Error`、`CMD_INFO failed`），必须 `kill -9` / `pkill -9 -x openocd`；`bench.py` 已按 SIGTERM→5 s→SIGKILL 处理，但外部直接 kill 父进程仍会留孤儿。
 
 固件启动锚点（基线，供回归比对）：host `Free heap after start-up: 216204`、`SWD relay ready`、`usb_send_task is ready!`、`ESP-NOW transmit rate ... 54 Mbps`；slave `Free heap after start-up: 285708`、`Wireless slave ready: UART + CMSIS-DAP SWD over ESP-NOW`。
 证据：`build_r_host/boot_perf1.log`（4,814 B）、`build_r_slave_c6/boot_perf1.log`（5,235 B）。
 
-### 2.5 T1.1 的 Python 环境结论（是否需要装包）
+### 2.5 T1.1 的 Python 环境（conda 独立环境）
 
-**不需要额外装包**：
+测量工具跑在专用 conda 环境 `endperf` 里（用户 m05177 要求独立环境），不污染系统 python 与 IDF venv：
 
-- 驱动 openocd、计时、解析输出、生成 JSON/Markdown：只用标准库（`subprocess`、`time`、`statistics`、`json`、`argparse`、`pathlib`、`re`）。
-- 若需要「复位 S3 / 抓启动日志」：优先用标准库 `os.open` + `termios`/`fcntl`（做 RTS 脉冲，**不**触发 DTR/RTS 默认串口行为）；若允许用 pyserial，则本机 `/usr/bin/python3` 与 IDF venv 都已带 **pyserial 3.5**，同样无需安装。
-- 唯一前置是**权限**：openocd 需要打开 S3 的 CMSIS-DAP USB 节点（当前会话若为 read-only 文件策略会 `Access denied`，属环境问题不属依赖问题）。
+| 项 | 值 |
+|---|---|
+| 环境路径 | `/home/dbb/miniforge3/envs/endperf`（`mamba activate endperf`） |
+| 解释器 | Python **3.12.16** |
+| 依赖 | `pyserial 3.5`（仅 `--recover` 的 RTS 复位需要；缺失时该功能降级） |
+| 重建命令 | `mamba create -y -n endperf python=3.12 pyserial` |
+
+`tools/perf/bench.py` 本身只用标准库（`subprocess`/`statistics`/`json`/`argparse`/`re`/`hashlib`/`shlex`），所以系统 `python3` 也能跑（只是没有 `--recover`）。外部依赖仅 `openocd` 0.12.0，另需能打开 S3 的 CMSIS-DAP USB 节点。
+
+用法与失败分类见 [`tools/perf/README.md`](../tools/perf/README.md)。
 
 ## 3. 预算表（T2.1 待填）
 
@@ -132,6 +149,7 @@
 | 日期 | 固件 | 目标 | 次数 | 成功 | 挂死 | 其它错误 | 成功率 | 证据 |
 |---|---|---|---|---|---|---|---|---|
 | 2026-11-06 | `32408ff` | F407 | 20 | 17 | 3 | 0（另 2 次反例属配置错误，不计） | 85% | `/tmp/f407w_*.log` |
+| 2026-11-06 夜 | `32408ff` | F407 | 8 | 0 | 8 | 0 | **0%** | `perf_out/20261106-230410-flash-program.*`、`/tmp/bench_flash500.log` |
 
 阈值（T4.1 定稿时填实）：100 次挂死 0；丢帧时 ≤1 s 快速失败；RTT p99 ≤0.8× 基线；批量读 ≥1.3× 基线；F407 `program` WALL median ≤4.5 s。
 

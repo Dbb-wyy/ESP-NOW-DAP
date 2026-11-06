@@ -19,6 +19,7 @@ sdkconfig.slave
 build_r_*/
 sdkconfig.r_*
 build_r_*.log
+perf_out/
 
 # My Editor settings (kept on disk, not tracked)
 .clangd
