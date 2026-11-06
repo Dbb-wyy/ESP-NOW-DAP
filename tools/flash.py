@@ -210,10 +210,20 @@ def _probe_once(port: Path, timeout: float = 25.0) -> dict:
             if match:
                 # "ESP32-S3" -> "esp32s3", the spelling the IDF uses in sdkconfig
                 chip = match.group(1).lower().replace("-", "")
-        elif lowered.strip().startswith("mac:"):
-            match = re.search(r"([0-9a-f]{2}(?::[0-9a-f]{2}){5})", line, re.IGNORECASE)
-            if match:
-                mac = match.group(1).lower()
+        elif lowered.strip().startswith(("base mac:", "mac:")):
+            # esptool prints both lines on chips that carry an EUI-64: the plain "MAC:"
+            # line is the interface MAC and can differ from the base MAC in the map.
+            groups = re.findall(r"[0-9a-fA-F]{2}", line.split(":", 1)[1])
+            if len(groups) == 8:
+                groups = groups[:3] + groups[5:]
+            if len(groups) == 6:
+                parsed = ":".join(g.lower() for g in groups)
+                if lowered.strip().startswith("base mac:"):
+                    mac = parsed
+                elif mac is None or not any(
+                    m.startswith("base mac") for m in text.lower().splitlines()
+                ):
+                    mac = parsed
 
     if proc.returncode != 0 or chip is None:
         tail = [line for line in text.splitlines() if line.strip()][-3:]
@@ -232,6 +242,23 @@ def load_map() -> dict[str, str]:
         return {}
     boards = data.get("boards", data)
     return {k.lower(): v for k, v in boards.items() if v in VARIANTS}
+
+
+def mapped_variant(
+    boards: dict[str, str], mac: str | None, chip: str | None
+) -> tuple[str | None, str | None]:
+    """MAC -> variant, ignoring an entry whose chip contradicts the board.
+
+    A stale entry is worse than no entry: it would let a C6 board be flashed with an
+    S3 image. The MAC map is therefore only trusted when the chip agrees with it.
+    """
+    variant = boards.get((mac or "").lower())
+    if not variant:
+        return None, None
+    expected = VARIANT_CHIP.get(variant)
+    if chip and expected and expected != chip:
+        return None, f"map says {variant}, but the chip is {chip}"
+    return variant, None
 
 
 def save_map(boards: dict[str, str]) -> None:
@@ -619,7 +646,11 @@ def main() -> int:
         result = probe(dev)
         row = {"name": name, "dev": dev, **result}
         if result.get("ok"):
-            row["variant"] = boards.get(result.get("mac") or "")
+            row["variant"], row["map_note"] = mapped_variant(
+                boards, result.get("mac"), result.get("chip")
+            )
+            if row["map_note"]:
+                print(f"  ignoring the board map: {row['mac']} — {row['map_note']}")
         rows.append(row)
         if result.get("gone"):
             print(f"  {name}\n    -> gone (re-enumerated while probing), skipped")
@@ -692,7 +723,10 @@ def main() -> int:
     # The whole point of the map is to catch "right chip, wrong board": a board that
     # is recorded as one variant must not silently receive another one. Only an
     # explicit --port (the user named this board) or --force overrides it.
-    recorded = boards.get(board.get("mac") or "")
+    recorded, map_note = mapped_variant(boards, board.get("mac"), board.get("chip"))
+    if map_note:
+        print(f"\nnote: ignoring the board map for {board.get('mac')}: {map_note}"
+              f" (fix it with --learn).")
     if recorded and recorded != variant:
         if wanted is None and not args.force:
             print(
@@ -723,6 +757,14 @@ def main() -> int:
         return 1
 
     if args.learn and board.get("mac"):
+        expected = VARIANT_CHIP.get(variant)
+        if expected and board.get("chip") and expected != board.get("chip"):
+            print(
+                f"\nnot recording {board['mac']} -> {variant}: the board is an "
+                f"{board['chip']}, a {variant} build targets {expected}.",
+                file=sys.stderr,
+            )
+            return 1
         boards[board["mac"]] = variant
         save_map(boards)
         print(f"recorded {board['mac']} -> {variant} in {BOARD_MAP.relative_to(REPO)}")

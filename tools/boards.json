@@ -1,6 +1,7 @@
 {
   "_comment": "MAC -> variant, learned by tools/flash.py --learn. The wireless boards are the same chip, so the variant has to be attached to a MAC, not to a port.",
   "boards": {
+    "ac:eb:e6:da:7a:f4": "slave_c6",
     "ec:da:3b:94:b2:f0": "host",
     "ec:da:3b:94:f5:54": "slave_s3"
   }
