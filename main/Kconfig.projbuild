@@ -305,20 +305,27 @@ menu "END-config"
                 DAP packet. The SWD relay is limited by that airtime, not by the
                 radio hardware, so a faster rate shortens every wireless round trip.
 
-                The price is margin: at 54 Mbps the same frame needs far less
-                airtime but also survives much less interference, so a weak signal
-                that 1 Mbps still carries may be lost. Both devices of a pair must
-                be able to hear the chosen rate; 802.11g rates are the safe common
-                ground for the ESP32-S3 and ESP32-C6.
+                The price is margin: a faster rate needs less airtime but also
+                survives less interference, so a weak signal that 1 Mbps still
+                carries may be lost. Both devices of a pair must use the same rate.
+
+                Measured on the ESP32-S3 host + ESP32-C6 slave pair at channel 1,
+                flashing a 16 KiB image over the SWD relay: 54 Mbps lost a request
+                frame in 9 of 10 runs (openocd then fails and retries), 24 Mbps and
+                11 Mbps lost none in 10 and 5 runs. The wireless round trip is
+                dominated by the per packet SWD and USB work, so 54 Mbps was not
+                faster even when it worked: 24 Mbps is the recommended setting for
+                the two wireless roles, 1 Mbps stays the default for a link that has
+                to work at range.
 
             config WLINK_TX_RATE_1M
                 bool "1 Mbps (default, most robust)"
             config WLINK_TX_RATE_11M
                 bool "11 Mbps (802.11b, short preamble)"
             config WLINK_TX_RATE_24M
-                bool "24 Mbps (802.11g)"
+                bool "24 Mbps (802.11g, recommended for the wireless roles)"
             config WLINK_TX_RATE_54M
-                bool "54 Mbps (802.11g, shortest airtime)"
+                bool "54 Mbps (802.11g, shortest airtime, loses frames on this link)"
         endchoice
 
         config WLINK_SWD_TIMEOUT_MS

@@ -11,7 +11,8 @@
 CONFIG_BRIDGE_ROLE_WIRELESS_HOST=y
 CONFIG_WLINK_CHANNEL=1
 
-# Performance trial: ESP-NOW defaults to 1 Mbps, which spends ~1 ms of airtime per
-# 64 byte DAP packet. Drop back to CONFIG_WLINK_TX_RATE_1M=y if the link turns out
-# flaky at range or under interference.
-CONFIG_WLINK_TX_RATE_54M=y
+# ESP-NOW defaults to 1 Mbps, which spends ~1 ms of airtime per 64 byte DAP packet.
+# 24 Mbps measured best for flashing over the relay (54 Mbps lost 1 request frame in
+# 9 of 10 runs, 24 Mbps lost none in 10; see docs/perf.md). Drop back to
+# CONFIG_WLINK_TX_RATE_1M=y if the link turns out flaky at range or under interference.
+CONFIG_WLINK_TX_RATE_24M=y

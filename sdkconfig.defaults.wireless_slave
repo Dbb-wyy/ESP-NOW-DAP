@@ -7,9 +7,9 @@
 CONFIG_BRIDGE_ROLE_WIRELESS_SLAVE=y
 CONFIG_WLINK_CHANNEL=1
 
-# Performance trial: both ends must use the same ESP-NOW rate; see
-# sdkconfig.defaults.wireless_host for the tradeoff.
-CONFIG_WLINK_TX_RATE_54M=y
+# Both ends must use the same ESP-NOW rate; 24 Mbps is the measured best for the
+# SWD relay, see sdkconfig.defaults.wireless_host and docs/perf.md.
+CONFIG_WLINK_TX_RATE_24M=y
 
 # No USB device is mounted on this side, so nothing resets the task watchdog on CPU1.
 CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=n
