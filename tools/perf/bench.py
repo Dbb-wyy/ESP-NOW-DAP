@@ -367,7 +367,7 @@ def _run_single_session(args, case: str, script: list[str], patterns: list[re.Pa
                     "failures": [], "attempts": 1, "ok": 0,
                     "requested": args.reps}
         kind = classify(run)
-        print(f"[{case}] attempt {attempt}: {kind} wall={run['wall_s']}s",
+        print(f"[{case}] attempt {attempts}: {kind} wall={run['wall_s']}s",
               file=sys.stderr, flush=True)
         if "TARGET_OK" not in run["out"]:
             failure = {"attempt": attempts, "status": kind,
