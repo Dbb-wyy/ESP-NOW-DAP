@@ -67,6 +67,13 @@
 /* How often the host relay re-checks the link while it waits for the peer. */
 #define BRIDGE_PEER_POLL_MS 100
 
+/*
+ * A DAP command that keeps the target busy for longer than this is worth one
+ * warning: it is the difference between "the link lost an answer" and "the
+ * target took its time", and the two need different handling.
+ */
+#define BRIDGE_SWD_SLOW_MS 100
+
 /* Same value as the debug_probe worker task priority. */
 #define BRIDGE_TASK_PRI 5
 

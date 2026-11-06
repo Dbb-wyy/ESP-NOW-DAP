@@ -10,11 +10,13 @@
  * the DAP engine itself lives on the slave.
  */
 
+#include <inttypes.h>
 #include <string.h>
 
 #include "sdkconfig.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -23,6 +25,7 @@
 
 #include "bridge_priv.h"
 #include "status_led.h"
+#include "usb_device.h"
 
 #if BRIDGE_ROLE_ID == BRIDGE_ROLE_HOST_ID
 
@@ -39,6 +42,11 @@ static SemaphoreHandle_t s_host_swd_resp_sem;
 static volatile uint8_t s_host_swd_tx_seq;
 static bool s_host_probe_started;
 
+/* Set when a request was abandoned: its late answer must not reach the host, which by
+   then waits for the answer of a newer request. */
+static uint8_t s_host_swd_dropped_seq;
+static bool s_host_swd_drop_valid;
+
 /* Runs in the Wi-Fi task: hand the DAP answer over to the USB IN task. */
 static void bridge_host_swd_rx(wlink_channel_t channel, uint8_t sub, uint8_t seq,
                                const uint8_t *payload, size_t len)
@@ -51,9 +59,16 @@ static void bridge_host_swd_rx(wlink_channel_t channel, uint8_t sub, uint8_t seq
         return;
     }
 
+    if (s_host_swd_drop_valid && seq == s_host_swd_dropped_seq) {
+        /* Answer to the request we already reported as failed: the host has moved on. */
+        ESP_LOGW(TAG, "DAP response seq %u arrived after the request was abandoned, dropped",
+                 (unsigned)seq);
+        return;
+    }
+
     if (seq != s_host_swd_tx_seq) {
-        BRIDGE_SWD_PKT_LOG("Late DAP response for seq %u (waiting for %u), dropped",
-                           seq, s_host_swd_tx_seq);
+        ESP_LOGW(TAG, "Late DAP response for seq %u (waiting for %u), dropped",
+                 seq, (unsigned)s_host_swd_tx_seq);
         return;
     }
 
@@ -116,6 +131,7 @@ static void bridge_host_swd_relay_task(void *arg)
          * receives as well. So fall through here rather than dropping the request.
          */
         bool delivered = false;
+        int64_t sent_at = esp_timer_get_time();
         for (int attempt = 0; attempt < CONFIG_WLINK_SWD_RETRIES; attempt++) {
             if (wlink_send(WLINK_CHANNEL_SWD, 0, seq, req.data, req.len) != ESP_OK) {
                 ESP_LOGW(TAG, "Cannot send the DAP request seq %u", seq);
@@ -128,6 +144,12 @@ static void bridge_host_swd_relay_task(void *arg)
 
             if (xSemaphoreTake(s_host_swd_resp_sem, pdMS_TO_TICKS(CONFIG_WLINK_SWD_TIMEOUT_MS)) == pdTRUE) {
                 delivered = true;
+                int64_t took_ms = (esp_timer_get_time() - sent_at) / 1000;
+                if (took_ms >= BRIDGE_SWD_SLOW_MS) {
+                    ESP_LOGW(TAG, "DAP request seq %u (cmd 0x%02x, %u bytes) took %" PRId64
+                             " ms to be answered", seq, req.len > 0 ? req.data[0] : 0,
+                             (unsigned)req.len, took_ms);
+                }
                 break;
             }
 
@@ -135,11 +157,28 @@ static void bridge_host_swd_relay_task(void *arg)
         }
 
         if (!delivered) {
-            /* Let the USB side time out instead of inventing a DAP answer. A late
-               response is dropped by the sequence check above. */
-            ESP_LOGW(TAG, "DAP request seq %u was not answered after %d attempts, link is %s",
+            /*
+             * Never invent a DAP answer, but never leave the host hanging either: a bulk
+             * IN read only completes when the device sends data, so report the failure at
+             * the USB level by stalling the endpoint. The host tool then sees a transfer
+             * error within a second and can retry, instead of waiting forever.
+             */
+            s_host_swd_dropped_seq = seq;
+            s_host_swd_drop_valid = true;
+
+            /* An answer cannot be queued after this point, but clear whatever a previous
+               request left behind so the next answer is read on its own. */
+            while (xSemaphoreTake(s_host_swd_resp_sem, 0) == pdTRUE) {
+            }
+
+            usb_device_vendor_abort_pending();
+
+            ESP_LOGW(TAG, "DAP request seq %u was not answered after %d attempts, link is %s, "
+                          "reported to the USB host as a transfer error",
                      seq, CONFIG_WLINK_SWD_RETRIES,
                      wlink_peer_ready() ? "paired" : "still unpaired");
+        } else {
+            s_host_swd_drop_valid = false;
         }
     }
 }

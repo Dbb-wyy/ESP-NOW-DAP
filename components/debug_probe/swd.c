@@ -6,12 +6,15 @@
 
 #include "sdkconfig.h"
 
+#include <inttypes.h>
+
 #if CONFIG_DEBUG_PROBE_IFACE_SWD
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/ringbuf.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "debug_probe.h"
 #include "debug_probe_priv.h"
 #include "DAP_config.h"
@@ -112,7 +115,22 @@ static void swd_task(void *pvParameters)
 
         ESP_LOG_BUFFER_HEXDUMP("req", request, total_bytes, ESP_LOG_DEBUG);
 
+        int64_t started_us = esp_timer_get_time();
         uint32_t resp_len = DAP_ProcessCommand(request, response) & 0xFFFF; //lower 16 bits are response len
+        int64_t busy_ms = (esp_timer_get_time() - started_us) / 1000;
+
+        if (busy_ms >= 100) {
+            /* One slow command explains a late answer, which the host relay reports as a
+               lost one when its timeout is shorter than this. */
+            ESP_LOGW(TAG, "DAP command 0x%02x (%u bytes) kept the DAP engine busy for %"
+                     PRId64 " ms", request[0], (unsigned)total_bytes, busy_ms);
+        }
+
+        if (resp_len == 0) {
+            /* Every CMSIS-DAP command but a delay answers; a silent one would leave the
+               relay waiting for an answer that never comes. */
+            ESP_LOGW(TAG, "DAP command 0x%02x produced no response", request[0]);
+        }
 
         ESP_LOG_BUFFER_HEXDUMP("res", response, resp_len, ESP_LOG_DEBUG);
 

@@ -33,6 +33,52 @@ typedef struct {
 static eub_vendord_interface_t s_eub_vendord_itf;
 static const uint8_t s_rhport = 0;
 
+/* A DAP packet was accepted and its answer has not been handed to the endpoint yet. */
+static volatile bool s_answer_pending;
+/* The probe backend reported that the answer of that packet is not coming. */
+static volatile bool s_abort_requested;
+/* The IN endpoint is stalled because that answer is not coming anymore. */
+static volatile bool s_in_stalled;
+
+/* The sender task polls in this granularity, so a reported failure reaches the host
+   well inside a second instead of waiting for a full timeout. */
+#define EUB_VENDORD_IN_POLL_MS   50
+/* Backstop: give up even if the probe backend never reports the failure. */
+#define EUB_VENDORD_IN_TIMEOUT_MS 2000
+#define EUB_VENDORD_IN_POLL_TICKS pdMS_TO_TICKS(EUB_VENDORD_IN_POLL_MS)
+#define EUB_VENDORD_IN_TIMEOUT_TICKS pdMS_TO_TICKS(EUB_VENDORD_IN_TIMEOUT_MS)
+
+static void eub_vendord_release_in_stall(void)
+{
+    if (!s_in_stalled) {
+        return;
+    }
+
+    s_in_stalled = false;
+    usbd_edpt_clear_stall(s_rhport, s_eub_vendord_itf.ep_in);
+    ESP_LOGI(TAG, "Vendor IN endpoint released, the host can read again");
+}
+
+/* Runs in the sender task, like every other usbd_edpt_*() call of this file. */
+static void eub_vendord_stall_pending(void)
+{
+    if (s_in_stalled || !s_answer_pending) {
+        return;
+    }
+
+    s_answer_pending = false;
+    s_in_stalled = true;
+    usbd_edpt_stall(s_rhport, s_eub_vendord_itf.ep_in);
+    ESP_LOGW(TAG, "No answer for the last DAP packet, vendor IN endpoint stalled");
+}
+
+/* Called from the probe backend, not from the USB stack: only raise a flag and let the
+   sender task do the endpoint work. */
+void usb_device_vendor_abort_pending(void)
+{
+    s_abort_requested = true;
+}
+
 static void eub_vendord_init(void)
 {
     ESP_LOGD(TAG, "%s", __func__);
@@ -46,6 +92,9 @@ static void eub_vendord_reset(uint8_t rhport)
 
     s_eub_vendord_itf.ep_in = 0;
     s_eub_vendord_itf.ep_out = 0;
+    s_answer_pending = false;
+    s_abort_requested = false;
+    s_in_stalled = false;
     /* do not reset the FreeRTOS handlers */
 }
 
@@ -204,6 +253,9 @@ static bool eub_vendord_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t r
         /* nothing to do for now */
         return true;
     } else if (ep_dir == TUSB_DIR_OUT) {
+        /* A new request means the host came back after an error, so let it read again. */
+        eub_vendord_release_in_stall();
+
         const usb_device_ops_t *ops = usb_device_get_ops();
         esp_err_t process_result = (ops != NULL && ops->probe_process_data != NULL)
                                    ? ops->probe_process_data(s_eub_vendord_itf.epout_buf, xferred_bytes)
@@ -212,6 +264,9 @@ static bool eub_vendord_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t r
             ESP_LOGW(TAG, "Debug probe failed to process data: %s", esp_err_to_name(process_result));
             eub_abort();
         }
+
+        /* From here on the host waits for exactly one answer on the IN endpoint. */
+        s_answer_pending = true;
 
         // Prepare for next incoming data
         if (!eub_endpt_transfer(rhport, ep_addr, s_eub_vendord_itf.epout_buf, EUB_VENDORD_EPSIZE)) {
@@ -228,6 +283,7 @@ static bool eub_vendord_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t r
 static void usb_send_task(void *pvParameters)
 {
     size_t total_bytes;
+    uint32_t waited = 0;
 
     ESP_LOGI(TAG, "usb_send_task is ready!");
 
@@ -238,13 +294,35 @@ static void usb_send_task(void *pvParameters)
             continue;
         }
 
-        uint8_t *buf_copy = ops->probe_get_data_to_send(&total_bytes, portMAX_DELAY);
+        uint8_t *buf_copy = ops->probe_get_data_to_send(&total_bytes, EUB_VENDORD_IN_POLL_TICKS);
+
+        if (buf_copy == NULL) {
+            if (s_abort_requested) {
+                /* The probe backend knows that this answer will never come: tell the host
+                   right away instead of letting its bulk IN read hang. */
+                s_abort_requested = false;
+                eub_vendord_stall_pending();
+                continue;
+            }
+
+            waited += EUB_VENDORD_IN_POLL_MS;
+            if (waited >= EUB_VENDORD_IN_TIMEOUT_MS) {
+                waited = 0;
+                eub_vendord_stall_pending();
+            }
+            continue;
+        }
+
+        waited = 0;
+        s_abort_requested = false;
+        eub_vendord_release_in_stall();
 
         if (!eub_endpt_transfer(s_rhport, s_eub_vendord_itf.ep_in, buf_copy, total_bytes)) {
             ESP_LOGE(TAG, "USB transfer error on EP:%x", s_eub_vendord_itf.ep_in);
             eub_abort();
         }
 
+        s_answer_pending = false;
         ops->probe_free_sent_data(buf_copy);
     }
 

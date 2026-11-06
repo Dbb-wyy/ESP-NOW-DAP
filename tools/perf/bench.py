@@ -169,6 +169,43 @@ def boards() -> dict:
     return {"usb_matches": usb, "serial_by_id": by_id}
 
 
+BY_ID_DIR = pathlib.Path("/dev/serial/by-id")
+
+
+def resolve_serial(spec: str) -> str:
+    """Map a console spec to a stable /dev/serial/by-id path.
+
+    The ttyACM numbers change with every enumeration, so accept any of: a full
+    path, the by-id link name, a fragment of that name, or a tty name (looked up
+    through the by-id links) and hand back the symlink whenever one matches.
+    """
+    if not spec:
+        return spec
+
+    as_path = pathlib.Path(spec)
+    if as_path.exists():
+        return spec
+
+    links = {}
+    if BY_ID_DIR.is_dir():
+        for link in sorted(BY_ID_DIR.iterdir()):
+            links[link.name] = os.path.realpath(link)
+
+    if spec in links:
+        return str(BY_ID_DIR / spec)
+    for name in links:
+        if spec in name:
+            return str(BY_ID_DIR / name)
+
+    if spec.startswith("tty"):
+        wanted = os.path.realpath(f"/dev/{spec}")
+        for name, real in links.items():
+            if real == wanted:
+                return str(BY_ID_DIR / name)
+
+    return spec
+
+
 def sha256_of(path: pathlib.Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as fh:
@@ -472,6 +509,8 @@ def main(argv: list[str]) -> int:
                         help="extra attempts after a hang/error (default 1)")
     common.add_argument("--recover", action="store_true",
                         help="pulse RTS on the host console after a hang/dap_dead")
+    common.add_argument("--host-console-serial", default="54E2053871",
+                        help="USB serial of the host board console (looked up by-id)")
     common.add_argument("--host-console", default=None,
                         help="host console tty (default: auto from by-id)")
     common.add_argument("--vid-pid", default="0x303a 0x1002")
@@ -506,9 +545,10 @@ def main(argv: list[str]) -> int:
             else DEFAULT_READ_ADDR[args.target]
     if args.len is None:
         args.len = DEFAULT_LEN[args.target]
+    args.host_console = resolve_serial(args.host_console) if args.host_console else None
     if not args.host_console:
         for name, real in boards()["serial_by_id"].items():
-            if "54E2053871" in name:
+            if args.host_console_serial in name:
                 args.host_console = real
 
     if args.dry_run:

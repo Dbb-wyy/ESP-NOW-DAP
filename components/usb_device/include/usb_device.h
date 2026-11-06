@@ -22,6 +22,7 @@
  *   host -> vendor control  -> usb_device_ops_t::probe_handle_command()
  *   host -> vendor bulk OUT -> usb_device_ops_t::probe_process_data()
  *   vendor bulk IN          <- usb_device_ops_t::probe_get_data_to_send()
+ *   vendor bulk IN, failure <- usb_device_vendor_abort_pending()
  *
  * Only USB-capable targets (ESP32-S2/S3) build this component. On the others
  * (C3/C6, wireless slave only) the component is present but contributes no
@@ -130,6 +131,20 @@ esp_err_t usb_device_register_ops(const usb_device_ops_t *ops);
  * @return ESP_OK on success, error code otherwise.
  */
 esp_err_t usb_device_start(void);
+
+/**
+ * @brief Fail the vendor bulk IN transfer that is waiting for an answer.
+ *
+ * CMSIS-DAP has no response timeout: once the host starts a bulk IN read it only
+ * completes when the device sends data. So when the probe backend decides that no
+ * answer will come in time (the wireless relay gave up on a DAP packet), the IN
+ * endpoint is stalled instead, which makes the host see a transfer error and lets
+ * it retry. The stall is cleared again when the next OUT packet arrives.
+ *
+ * Safe to call when the probe backend already delivered data: the call is then a
+ * no-op, because no answer is outstanding.
+ */
+void usb_device_vendor_abort_pending(void);
 
 /**
  * @brief Feed bytes coming from the target into the USB CDC IN endpoint.

@@ -118,7 +118,13 @@ typedef struct {
 
 esp_err_t usb_device_register_ops(const usb_device_ops_t *ops);  // before start
 esp_err_t usb_device_start(void);
+void      usb_device_vendor_abort_pending(void);                 // fail a stuck bulk IN
 ```
+
+`usb_device_vendor_abort_pending()` is the escape hatch of the wireless relay: CMSIS-DAP has no
+response timeout, so a bulk IN read only completes when the device sends data. When the relay gives
+up on a DAP packet it calls this, the vendor IN endpoint is stalled, and the host sees a transfer
+error it can retry; the next bulk OUT packet clears the stall again.
 
 On chips without USB OTG (C3/C6) the component is **not compiled at all** (decision D3): its
 `CMakeLists.txt` registers no sources and no `tinyusb`/`usb` dependency on those targets, so no

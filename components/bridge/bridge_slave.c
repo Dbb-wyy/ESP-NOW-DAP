@@ -39,6 +39,10 @@ typedef struct {
 
 static QueueHandle_t s_swd_req_q;
 
+/* Last request sequence number that reached this side, to spot lost frames. */
+static uint8_t s_swd_last_rx_seq;
+static bool s_swd_last_rx_valid;
+
 /*
  * Sequence numbers of the requests that were accepted but not answered yet, oldest first.
  * The DAP engine answers every request with exactly one response, in request order, so
@@ -118,6 +122,20 @@ static void bridge_slave_swd_rx(wlink_channel_t channel, uint8_t sub, uint8_t se
                  seq, (unsigned)len);
         return;
     }
+
+    /*
+     * The host sends one request at a time, so every request that reaches this side has a
+     * sequence number exactly one past the previous one. A gap therefore means a frame
+     * was lost on the way here, which is worth one line: it separates "the link dropped
+     * the request" from "the answer never came back".
+     */
+    if (s_swd_last_rx_valid && seq != (uint8_t)(s_swd_last_rx_seq + 1)) {
+        ESP_LOGW(TAG, "DAP request seq %u arrived after %u, %u frame(s) lost on the way here",
+                 seq, (unsigned)s_swd_last_rx_seq,
+                 (unsigned)(uint8_t)(seq - s_swd_last_rx_seq - 1));
+    }
+    s_swd_last_rx_seq = seq;
+    s_swd_last_rx_valid = true;
 
     bridge_dap_track_session(payload, len);
 
@@ -260,7 +278,7 @@ static void bridge_slave_swd_tx_task(void *arg)
             ESP_LOGE(TAG, "DAP response of %u bytes has no pending request, dropped",
                      (unsigned)len);
         } else if (n == 0) {
-            BRIDGE_SWD_PKT_LOG("DAP response seq %u is empty, nothing to send", seq);
+            ESP_LOGW(TAG, "DAP response seq %u is empty, nothing to send", seq);
         } else if (wlink_send(WLINK_CHANNEL_SWD, 0, seq, s_swd_last_resp, n) != ESP_OK) {
             ESP_LOGW(TAG, "Cannot send DAP response seq %u", seq);
         } else {

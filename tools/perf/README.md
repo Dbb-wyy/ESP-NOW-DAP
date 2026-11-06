@@ -23,6 +23,8 @@ mamba create -y -n endperf python=3.12 pyserial
 `bench.py` 只用标准库（`subprocess`/`statistics`/`json`/`argparse`/`re`/`hashlib` 等）；
 pyserial 仅在 `--recover` 时用于给 S3 控制台发 RTS 脉冲，缺失时该功能降级为「不恢复」。
 
+**不要写死 `ttyACM*`**：USB 枚举顺序一变序号就变，脚本里一律用 `/dev/serial/by-id/…`；`bench.py` 会自动把 `ttyACM*` 或序列号片段解析回 by-id 路径再打印到报告里。
+
 外部依赖：`openocd`（0.12.0）、可选 `gdb-multiarch`；USB 权限需能打开 S3 的 CMSIS-DAP 节点。
 
 ## 用例
@@ -58,7 +60,8 @@ tools/perf/bench.py flash-program --target f4x \
 | `--timeout` | 120 s | 单个 openocd 进程超时；超时即判挂死并 kill |
 | `--retries` | 1 | 挂死/报错后的额外重试次数（计入 attempts） |
 | `--recover` | 关 | 挂死后对 S3 控制台发 RTS 脉冲复位（会触发重新配对） |
-| `--host-console` | 自动 | 主机控制台 tty；默认按 `/dev/serial/by-id` 里 S3 的 CH340 序列号取 |
+| `--host-console` | 自动 | 主机控制台；可给完整路径、by-id 链接名或片段、或 `ttyACM*`，都会被解析成 `/dev/serial/by-id/…` |
+| `--host-console-serial` | `54E2053871` | 没给 `--host-console` 时，按这个 USB 序列号在 `/dev/serial/by-id` 里找主机控制台 |
 | `--vid-pid` | `0x303a 0x1002` | 显式指定 CMSIS-DAP，避免多探针误选 |
 | `--out-dir` | `perf_out` | JSON/Markdown 输出目录（已 gitignore） |
 
