@@ -587,7 +587,10 @@ def main() -> int:
     parser.add_argument("--capture", type=int, default=8, help="boot log seconds (default 8)")
     args = parser.parse_args()
 
-    devices = known_serial_devices(include_dap=args.include_dap)
+    # Naming the port by hand is an explicit statement that this is the board wanted, so
+    # the native USB interface is fair game then: a C3 (or an S3 without a CH340) only has
+    # that one port.
+    devices = known_serial_devices(include_dap=args.include_dap or bool(args.port))
     if not devices:
         print("No serial port found (is the board plugged in?)", file=sys.stderr)
         return 2
@@ -601,6 +604,7 @@ def main() -> int:
         return 0
 
     if args.all or args.pair:
+        devices = known_serial_devices(include_dap=True)
         if args.port or args.variant:
             # Silence here would let someone believe the run was pinned to one board.
             print(
@@ -618,13 +622,17 @@ def main() -> int:
             return 2
         wanted = matches[0]
     if wanted is None and args.variant:
-        # Narrow by chip first so only the plausible port is probed.
-        candidates = [
+        # Narrow by chip first so only the plausible port is probed. Native USB ports carry
+        # the chip's MAC, not its name, so fall back to every port and let the probe decide.
+        by_name = [
             (name, dev)
             for name, dev in devices
             if VARIANT_CHIP[args.variant].lower() in name.lower()
             or VARIANT_CHIP[args.variant] == "esp32s3"  # S3 boards sit behind a CH340 or the native USB
         ]
+        # A board that only has its native USB port (C3, or an S3 with no CH340) carries no
+        # chip name in the port name, so probe every port and let the chip decide.
+        candidates = by_name or devices
     else:
         candidates = devices
 
