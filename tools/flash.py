@@ -361,6 +361,11 @@ def main() -> int:
         "--port", help="by-id name or path (default: detect from --variant)"
     )
     parser.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="flash even though the MAC is recorded as another variant",
+    )
     parser.add_argument("--dry-run", action="store_true", help="print the plan only")
     parser.add_argument("--learn", action="store_true", help="record MAC -> variant in tools/boards.json")
     parser.add_argument("--capture", type=int, default=8, help="boot log seconds (default 8)")
@@ -485,13 +490,23 @@ def main() -> int:
             print(f"  - {error}")
         return 1
 
-    # A mapped board that is about to be written with a different variant is the
-    # one case where the table above is not enough: say it out loud.
+    # The whole point of the map is to catch "right chip, wrong board": a board that
+    # is recorded as one variant must not silently receive another one. Only an
+    # explicit --port (the user named this board) or --force overrides it.
     recorded = boards.get(board.get("mac") or "")
     if recorded and recorded != variant:
+        if wanted is None and not args.force:
+            print(
+                f"\nrefusing to flash: {board.get('mac')} is recorded as {recorded} in "
+                f"{BOARD_MAP.relative_to(REPO)}, but this is a {variant} build.\n"
+                f"  - pick the {recorded} variant, or\n"
+                f"  - name this board explicitly with --port (you meant this one), or\n"
+                f"  - pass --force if the map is out of date (then --learn the new variant)."
+            )
+            return 2
         print(
             f"\nnote: {board.get('mac')} is recorded as {recorded}, "
-            f"you are flashing {variant} onto it."
+            f"you are flashing {variant} onto it (allowed by --port/--force)."
         )
 
     if args.dry_run:
