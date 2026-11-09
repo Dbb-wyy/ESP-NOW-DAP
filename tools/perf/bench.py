@@ -48,7 +48,22 @@ DEFAULT_ADDR = {"f1x": "0x20001000", "f4x": "0x20000000"}
 DEFAULT_LEN = {"f1x": 8192, "f4x": 32768}
 DEFAULT_READ_ADDR = {"f1x": "0x08000000", "f4x": "0x08000000"}
 
-HANG_KINDS = {"hang_during_program", "hang_before_target", "timeout", "dap_dead"}
+HANG_KINDS = {"hang_during_program", "hang_before_target", "dap_dead"}
+
+# Relative gate rules, applied against perf_out/baseline.json (--save-baseline).
+# Absolute floors come from docs/perf.md §4 (Plan_v3 T4.1); they are written
+# here as data so the tool and the doc cannot drift apart silently.
+GATE_RULES = {
+    "rtt": {"metric": "p99", "op": "<=", "factor": 0.8,
+            "abs": 2100.0},
+    "bulk-read": {"metric": "p50", "op": ">=", "factor": 1.3,
+                  "abs": None},
+    "bulk-write-ram": {"metric": "p50", "op": ">=", "factor": 1.3,
+                       "abs": None},
+    "flash-program": {"metric": "p50", "op": "<=", "factor": None,
+                      "abs": 4.5},
+}
+BASELINE = "perf_out/baseline.json"
 
 RE_NUM = re.compile(r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?")
 RE_DUMP = re.compile(r"dumped (\d+) bytes in ([\d.]+)s \(([\d.]+) KiB/s\)")
@@ -98,10 +113,17 @@ def classify(run: dict) -> str:
         return "hang_before_target"
     if "CMSIS-DAP command CMD_INFO failed" in out:
         return "dap_dead"
+    if "unable to find a matching CMSIS-DAP device" in out \
+            or "could not open device" in out:
+        return "dap_dead"
+    if "Pipe error" in out:
+        return "pipe_error"
     if "failed erasing sectors" in out:
         return "target_error_erase"
     if "error executing stm32x flash" in out or "flash write failed" in out:
         return "target_error_write"
+    if "timeout waiting for algorithm" in out:
+        return "algorithm_timeout"
     if "Error: Error setting register" in out:
         return "swd_margin_error"
     if run["rc"] != 0:
@@ -138,15 +160,19 @@ def sh(cmd: list[str], timeout: float = 10) -> str:
 
 
 def sdkconfig_keys() -> dict:
-    """A few Kconfig values that change the measured numbers."""
+    """A few Kconfig values that change the measured numbers.
+
+    Every `sdkconfig.r_*` that exists on disk is recorded, so an A/B run with
+    a non-default slave variant (slave_s3, slave_c3, *_ch11, ...) cannot be
+    silently mislabelled as the default host/slave_c6 pair.
+    """
     keys = ["CONFIG_IDF_TARGET=", "CONFIG_BRIDGE_ROLE_", "CONFIG_WLINK_CHANNEL=",
             "CONFIG_WLINK_TX_RATE_", "CONFIG_WLINK_SWD_TIMEOUT_MS=",
             "CONFIG_WLINK_SWD_RETRIES=", "CONFIG_WLINK_SWD_VERBOSE_LOG=",
             "CONFIG_COMPILER_OPTIMIZATION_", "CONFIG_LOG_DEFAULT_LEVEL="]
     found = {}
-    for variant in ("host", "slave_c6"):
-        path = REPO / f"sdkconfig.r_{variant}"
-        if not path.exists():
+    for path in sorted(REPO.glob("sdkconfig.r_*")):
+        if not path.is_file():
             continue
         vals = []
         for line in path.read_text(errors="replace").splitlines():
@@ -154,7 +180,7 @@ def sdkconfig_keys() -> dict:
                 continue
             if any(line.startswith(k) for k in keys):
                 vals.append(line.strip())
-        found[variant] = sorted(vals)
+        found[path.name.replace("sdkconfig.r_", "")] = sorted(vals)
     return found
 
 
@@ -182,15 +208,14 @@ def resolve_serial(spec: str) -> str:
     if not spec:
         return spec
 
-    as_path = pathlib.Path(spec)
-    if as_path.exists():
-        return spec
-
     links = {}
     if BY_ID_DIR.is_dir():
         for link in sorted(BY_ID_DIR.iterdir()):
             links[link.name] = os.path.realpath(link)
 
+    # Prefer a stable by-id link even when the caller passed /dev/ttyACM0:
+    # tty numbers change on every enumeration, so the symlink is the provenance
+    # we actually want in the JSON.
     if spec in links:
         return str(BY_ID_DIR / spec)
     for name in links:
@@ -223,7 +248,8 @@ def snapshot(args) -> dict:
         "repo": str(REPO),
         "git_head": sh(["git", "-C", str(REPO), "rev-parse", "HEAD"]),
         "git_describe": sh(["git", "-C", str(REPO), "describe", "--tags", "--always"]),
-        "git_dirty": sh(["git", "-C", str(REPO), "status", "--porcelain"]),
+        "git_dirty": sh(["git", "-C", str(REPO), "status", "--porcelain",
+                         "--untracked-files=no"]),
         "openocd": sh([OPENOCD, "--version"]).splitlines()[:1],
         "python": f"{sys.version.split()[0]} ({sys.executable})",
         "uname": sh(["uname", "-smr"]),
@@ -239,6 +265,14 @@ def snapshot(args) -> dict:
     return info
 
 
+def percentile(ordered: list[float], q: float) -> float:
+    """Nearest-rank-ish percentile; q in [0, 1]. ordered must be sorted."""
+    if not ordered:
+        raise ValueError("empty sample list")
+    idx = int(round(q * (len(ordered) - 1)))
+    return ordered[max(0, min(len(ordered) - 1, idx))]
+
+
 def stats(values: list[float]) -> dict:
     if not values:
         return {"n": 0}
@@ -248,7 +282,8 @@ def stats(values: list[float]) -> dict:
         "min": round(ordered[0], 3),
         "p50": round(statistics.median(ordered), 3),
         "mean": round(statistics.fmean(ordered), 3),
-        "p95": round(ordered[min(len(ordered) - 1, int(round(0.95 * (len(ordered) - 1))))], 3),
+        "p95": round(percentile(ordered, 0.95), 3),
+        "p99": round(percentile(ordered, 0.99), 3),
         "max": round(ordered[-1], 3),
     }
 
@@ -324,6 +359,8 @@ def case_flash_program(args) -> dict:
                 and "Verified OK" in run["out"]
             entry = {"rep": rep + 1, "attempt": attempt, "status": kind,
                      "wall_s": run["wall_s"], "rc": run["rc"]}
+            if not ok:
+                entry["detail"] = run["out"][-600:]
             m = RE_WROTE.search(run["out"])
             if m:
                 entry["write_kibs"] = float(m.group(3))
@@ -352,11 +389,18 @@ def case_flash_program(args) -> dict:
 
 
 def _run_single_session(args, case: str, script: list[str], patterns: list[re.Pattern]) -> dict:
-    """Run one openocd session whose script prints the samples; parse them."""
+    """Run one openocd session whose script prints the samples; parse them.
+
+    Every attempt is kept in `runs`, and every failed attempt in `failures` --
+    a retry that eventually succeeds must not erase the fact that the link
+    failed once. `ok` is the number of samples, `requested` the number asked
+    for, so `ok != requested` is the honest success signal.
+    """
     attempts = 0
-    samples = []
-    last_run = {}
-    failure = None
+    samples: list[float] = []
+    runs: list[dict] = []
+    failures: list[dict] = []
+    last_run: dict = {}
     while True:
         attempts += 1
         run = run_oc(with_script(args, script), args.timeout, args.dry_run)
@@ -370,21 +414,25 @@ def _run_single_session(args, case: str, script: list[str], patterns: list[re.Pa
         print(f"[{case}] attempt {attempts}: {kind} wall={run['wall_s']}s",
               file=sys.stderr, flush=True)
         if "TARGET_OK" not in run["out"]:
-            failure = {"attempt": attempts, "status": kind,
-                       "wall_s": run["wall_s"], "detail": run["out"][-400:]}
-        else:
-            samples = _parse_samples(run["out"], case, patterns)
+            entry = {"attempt": attempts, "status": kind,
+                     "wall_s": run["wall_s"], "detail": run["out"][-600:]}
+            failures.append(entry)
+            runs.append(entry)
+            if args.recover and args.host_console and kind in HANG_KINDS:
+                entry["recover"] = pulse_rts(args.host_console)
+                time.sleep(3)
+            if attempts > args.retries:
+                break
+            continue
+        samples = _parse_samples(run["out"], case, patterns)
+        runs.append({"attempt": attempts,
+                     "status": "ok" if samples else "empty",
+                     "wall_s": run["wall_s"], "samples": len(samples)})
         if samples or attempts > args.retries:
             break
-        if args.recover and args.host_console and kind in HANG_KINDS:
-            pulse_rts(args.host_console)
-            time.sleep(3)
     result = {"case": case, "samples": samples, "attempts": attempts,
-              "ok": 1 if samples else 0, "requested": 1,
-              "runs": [{"attempt": attempts,
-                        "status": "ok" if samples else (failure or {}).get("status", "error"),
-                        "wall_s": last_run.get("wall_s")}],
-              "failures": [failure] if failure and not samples else []}
+              "ok": len(samples), "requested": args.reps, "runs": runs,
+              "failures": failures}
     if not samples and not args.dry_run:
         result["last_output_tail"] = last_run.get("out", "")[-600:]
     return result
@@ -413,7 +461,7 @@ def summarise(result: dict) -> dict:
     return result
 
 
-def write_outputs(result: dict, snapshot_data: dict, args, started: float) -> None:
+def write_outputs(result: dict, snapshot_data: dict, args, started: float) -> dict:
     payload = {
         "case": result["case"],
         "started": snapshot_data["when"],
@@ -437,6 +485,7 @@ def write_outputs(result: dict, snapshot_data: dict, args, started: float) -> No
     json_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
     md_path.write_text(render_markdown(payload), encoding="utf-8")
     print(f"\nJSON: {json_path.relative_to(REPO)}\nMD  : {md_path.relative_to(REPO)}")
+    return payload
 
 
 def render_markdown(payload: dict) -> str:
@@ -451,8 +500,10 @@ def render_markdown(payload: dict) -> str:
              f"- target: `{s.get('target_cfg')}` @ {s.get('swd_khz')} kHz",
              f"- params: `{json.dumps(payload['params'], ensure_ascii=False)}`", ""]
     if st.get("n"):
-        lines += ["| n | min | p50 | mean | p95 | max | unit |", "|---|---|---|---|---|---|---|",
-                  f"| {st['n']} | {st['min']} | {st['p50']} | {st['mean']} | {st['p95']} | {st['max']} | {unit} |", ""]
+        lines += ["| n | min | p50 | mean | p95 | p99 | max | unit |",
+                  "|---|---|---|---|---|---|---|---|",
+                  f"| {st['n']} | {st['min']} | {st['p50']} | {st['mean']} | "
+                  f"{st['p95']} | {st.get('p99')} | {st['max']} | {unit} |", ""]
     else:
         lines += ["_no samples_", ""]
     if payload["case"] == "flash-program":
@@ -484,13 +535,84 @@ def do_check(args) -> int:
     for key in ("git_head", "git_describe", "openocd", "python", "uname", "target_cfg", "swd_khz"):
         print(f"{key:12s} {snap[key]}")
     print("== boards ==")
-    for line in snap["boards"]["usb_matches"]:
+    usb = snap["boards"]["usb_matches"]
+    dap = [line for line in usb if "303a:1002" in line]
+    console = [line for line in usb if "1a86:55d3" in line]
+    for line in usb:
         print(" ", line)
     for name, real in snap["boards"]["serial_by_id"].items():
         print(f"  {name} -> {real}")
-    ok = bool(snap["boards"]["usb_matches"]) and pathlib.Path(OPENOCD).exists()
-    print("== verdict ==", "ready" if ok else "MISSING openocd or CMSIS-DAP")
-    return 0 if ok else 1
+    if not dap:
+        print("== verdict == no CMSIS-DAP (303a:1002) attached")
+        return 1
+    if not console:
+        print("== verdict == DAP ready, but no host console CH340 (1a86:55d3) -- "
+              "--recover will not work")
+        return 0
+    if not pathlib.Path(OPENOCD).exists():
+        print("== verdict == MISSING openocd")
+        return 1
+    print("== verdict == ready")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# gate / baseline
+# --------------------------------------------------------------------------- #
+
+def load_baseline() -> dict:
+    path = REPO / BASELINE
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:  # noqa: BLE001
+        print(f"warning: cannot read {path}: {exc}", file=sys.stderr)
+        return {}
+
+
+def save_baseline(payload: dict) -> None:
+    path = REPO / BASELINE
+    data = load_baseline()
+    data[payload["case"]] = {
+        "when": payload["started"],
+        "stats": payload["stats"],
+        "unit": payload["unit"],
+        "swd_khz": payload["snapshot"].get("swd_khz"),
+        "target_cfg": payload["snapshot"].get("target_cfg"),
+        "git_head": payload["snapshot"].get("git_head"),
+        "params": payload.get("params", {}),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n")
+    print(f"baseline updated: {path.relative_to(REPO)}")
+
+
+def gate_report(payload: dict, baseline: dict) -> list[tuple[str, bool, str]]:
+    """Compare one case against GATE_RULES + perf_out/baseline.json."""
+    case, st = payload["case"], payload["stats"]
+    if not st.get("n"):
+        return [("samples", False, "no samples")]
+    rule = GATE_RULES.get(case)
+    if not rule:
+        return [("samples", True, "no gate rule for this case")]
+    metric = rule["metric"]
+    cur = st.get(metric)
+    base = (baseline.get(case) or {}).get("stats") or {}
+    limit = rule.get("abs")
+    note = "absolute threshold"
+    if rule.get("factor") and base.get(metric):
+        rel = base[metric] * rule["factor"]
+        if limit is None:
+            limit, note = rel, f"{rule['factor']}x baseline {base[metric]}"
+        elif rule["op"] == "<=" and rel < limit:
+            limit, note = rel, f"{rule['factor']}x baseline {base[metric]}"
+    if limit is None:
+        return [(f"{metric}", True,
+                 f"{metric}={cur} recorded (no baseline/threshold yet)")]
+    ok = cur <= limit if rule["op"] == "<=" else cur >= limit
+    return [(f"{metric} {rule['op']} {round(limit, 3)}", ok,
+             f"{metric}={cur} ({note})")]
 
 
 # --------------------------------------------------------------------------- #
@@ -516,6 +638,11 @@ def main(argv: list[str]) -> int:
     common.add_argument("--vid-pid", default="0x303a 0x1002")
     common.add_argument("--dry-run", action="store_true")
     common.add_argument("--out-dir", default="perf_out")
+    common.add_argument("--gate", action="store_true",
+                        help="compare this run against perf_out/baseline.json "
+                             "and the absolute thresholds in GATE_RULES")
+    common.add_argument("--save-baseline", action="store_true",
+                        help="record this run's stats into perf_out/baseline.json")
 
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -525,15 +652,18 @@ def main(argv: list[str]) -> int:
         p = sub.add_parser(name, parents=[common])
         p.add_argument("--addr", default=None)
         p.add_argument("--len", type=int, default=None)
-        p.add_argument("--elf", default="test/p01/build/p01.elf")
+        p.add_argument("--elf", default=None,
+                       help="ELF to flash (required by flash-program)")
     args = ap.parse_args(argv)
 
     if getattr(args, "check", False):
-        return do_check(argparse.Namespace(elf="test/p01/build/p01.elf",
-                                          target="f4x", swd_khz=2000))
+        return do_check(argparse.Namespace(elf=None, target="f4x", swd_khz=2000))
     if args.case is None:
         ap.print_help()
         return 1
+    if args.case == "flash-program" and not args.elf:
+        ap.error("flash-program requires an explicit --elf <image.elf> "
+                 "(the image sha256 is part of the provenance)")
 
     # defaults that depend on target / case
     defaults = {"rtt": 30, "bulk-read": 5, "bulk-write-ram": 5, "flash-program": 10}
@@ -576,11 +706,23 @@ def main(argv: list[str]) -> int:
     if result["stats"].get("n"):
         st = result["stats"]
         print(f"  min={st['min']} p50={st['p50']} mean={st['mean']} "
-              f"p95={st['p95']} max={st['max']} {result['unit']}")
+              f"p95={st['p95']} p99={st.get('p99')} max={st['max']} "
+              f"{result['unit']}")
     if result.get("failures"):
         print(f"  failures: {[f.get('status') for f in result['failures']]}")
-    write_outputs(result, snap, args, started)
+    payload = write_outputs(result, snap, args, started)
+    if getattr(args, "save_baseline", False):
+        save_baseline(payload)
+    gate_failed = False
+    if getattr(args, "gate", False):
+        checks = gate_report(payload, load_baseline())
+        print("\n== gate ==")
+        for name, passed, detail in checks:
+            print(f"  [{'PASS' if passed else 'FAIL'}] {name}: {detail}")
+        gate_failed = any(not passed for _, passed, _ in checks)
     ok = bool(result["stats"].get("n"))
+    if gate_failed:
+        return 2
     return 0 if ok else 2
 
 
