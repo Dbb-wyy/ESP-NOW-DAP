@@ -195,11 +195,11 @@ static void build_gamma_lut(void) {
  * brightness of 64 and 0..6 at brightness 8. Rounding the ramp to whole codes
  * therefore advances it in steps of a sixth of its range, which looks exactly
  * like an LED that refreshes two or three times a second - however often the
- * task actually runs and whatever STATUS_LED_TICK_MS says. Carrying the rounding
- * error into the next frame turns every step into a duty cycle, so the average
- * over a few frames follows the curve continuously. That average is what the
- * eye integrates, but only while the pulses are small or frequent enough: see
- * STATUS_LED_DITHER_MIN_PEAK below for the case where they are not.
+ * task actually runs and whatever STATUS_LED_TICK_MS says. Carrying the
+ * rounding error into the next frame turns every step into a duty cycle, so the
+ * average over a few frames follows the curve continuously. That average is
+ * what the eye integrates, but only while the pulses are small or frequent
+ * enough: see STATUS_LED_DITHER_MIN_PEAK below for the case where they are not.
  */
 static uint32_t s_dither[3];
 
@@ -290,7 +290,7 @@ static void state_swd_and_serial(uint32_t now) {
     led_flash(140, 0, 255, now); /* violet */
 }
 
-static void state_swd(uint32_t now) { led_flash(0, 80, 255, now); /* blue */ }
+static void state_swd(uint32_t now) { led_flash(0, 0, 255, now); /* blue */ }
 
 static void state_serial(uint32_t now) {
     led_flash(0, 255, 0, now); /* green */
@@ -338,8 +338,8 @@ static void led_apply_status(led_status_t status, uint32_t now) {
  * (wired) bridge has no link at all and is treated as always linked.
  */
 static led_status_t led_sample_status(uint32_t now) {
-    const bool up =
-        s_local || (s_ops != NULL && s_ops->link_up != NULL && s_ops->link_up());
+    const bool up = s_local || (s_ops != NULL && s_ops->link_up != NULL &&
+                                s_ops->link_up());
     const bool swd =
         swd_session_active(now) || activity_recent(STATUS_LED_ACT_SWD, now);
     const bool serial = activity_recent(STATUS_LED_ACT_SERIAL, now);
@@ -515,13 +515,9 @@ void status_led_set_link_ops(const status_led_link_ops_t *ops) {
 
 void status_led_set_local(bool local) { (void)local; }
 
-void status_led_notify_activity(status_led_activity_t act) {
-    (void)act;
-}
+void status_led_notify_activity(status_led_activity_t act) { (void)act; }
 
-void status_led_notify_swd_session(bool active) {
-    (void)active;
-}
+void status_led_notify_swd_session(bool active) { (void)active; }
 
 esp_err_t status_led_init(void) {
     /* No pin is claimed, so there is nothing to validate and nothing to touch.

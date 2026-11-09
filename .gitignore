@@ -32,3 +32,6 @@ perf_out/
 __pycache__/
 *.pyc
 
+
+# Local test fixtures and target images: not shared.
+/test/
