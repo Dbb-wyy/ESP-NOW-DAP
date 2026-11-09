@@ -6,6 +6,16 @@
 #   tools/build_flash.sh --no-flash      # build only
 #   tools/build_flash.sh --no-build      # flash the existing build_r_<v> images
 #   tools/build_flash.sh --dry-run       # print the plan, touch nothing
+#   tools/build_flash.sh --keep-build    # keep the full build tree (no pruning)
+#   tools/build_flash.sh --gz-symbols    # gzip bridge.elf/.map into symbols/
+#
+# After a successful flash (or after the build when --no-flash is given) each
+# build_r_<v> tree is pruned to the flashing and debugging firmware only:
+# bridge.bin, bridge.elf, bridge.map, flash_args, flasher_args.json,
+# config/sdkconfig.json, bootloader/bootloader.bin, partition_table/*.bin and
+# the logs. That is about 19 MiB per variant instead of 170-233 MiB.
+# The next build of a pruned variant is a full rebuild (no incremental state).
+# A failed build or flash is never pruned, so its output stays for diagnosis.
 #
 # Why this exists: the 24 Mbps wireless build needs the per-role defaults chain
 # (sdkconfig.defaults + sdkconfig.defaults.wireless_*); omitting it silently
@@ -30,10 +40,12 @@ DO_BUILD=1
 DO_FLASH=1
 ASSUME_YES=0
 DRY_RUN=0
+PRUNE=1
+GZ_SYMBOLS=0
 VARIANTS=()
 
 usage() {
-    sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,/^set -uo pipefail/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'
 }
 
 die() {
@@ -47,6 +59,9 @@ while (($#)); do
         --no-flash) DO_FLASH=0 ;;
         -y|--yes) ASSUME_YES=1 ;;
         --dry-run) DRY_RUN=1 ;;
+        --keep-build|--no-prune) PRUNE=0 ;;
+        --prune) PRUNE=1 ;;
+        --gz-symbols) GZ_SYMBOLS=1 ;;
         --capture) CAPTURE_SECONDS="${2:-8}"; shift ;;
         -h|--help) usage; exit 0 ;;
         -*) echo "unknown option: $1" >&2; usage; exit 2 ;;
@@ -140,6 +155,48 @@ build_variant() {
     return 0
 }
 
+# Prune one build tree down to the flashing/debugging firmware. Sets PRUNE_STATS[$v].
+# Kept: bridge.bin, bridge.elf, bridge.map, flash_args, flasher_args.json,
+# merged-binary.bin (if any), the four logs, config/sdkconfig.json,
+# bootloader/bootloader.bin, partition_table/partition-table.bin, symbols/.
+# tools/flash.py needs bridge.bin + flash_args + config/sdkconfig.json; openocd/gdb
+# needs bridge.elf (and bridge.map for address lookups); esptool needs the two
+# extra bins via flash_args.
+declare -A PRUNE_STATS=()
+prune_build() {
+    local v="$1" b="$REPO_ROOT/build_r_$v" before after
+    ((PRUNE)) || return 0
+    [ -d "$b" ] || return 0
+    before="$(du -sk "$b" | cut -f1)"
+
+    find "$b" -mindepth 1 -maxdepth 1 \
+        ! -name bridge.bin ! -name bridge.elf ! -name bridge.map \
+        ! -name flash_args ! -name flasher_args.json ! -name merged-binary.bin \
+        ! -name build_skill.log ! -name size_skill.log ! -name flash_skill.log ! -name boot_flash.log \
+        ! -name config ! -name bootloader ! -name partition_table ! -name symbols \
+        -exec rm -rf {} + 2>/dev/null
+
+    find "$b/config" -mindepth 1 -maxdepth 1 ! -name sdkconfig.json -exec rm -rf {} + 2>/dev/null
+    find "$b/bootloader" -mindepth 1 -maxdepth 1 ! -name bootloader.bin -exec rm -rf {} + 2>/dev/null
+    find "$b/partition_table" -mindepth 1 -maxdepth 1 ! -name partition-table.bin -exec rm -rf {} + 2>/dev/null
+
+    if ((GZ_SYMBOLS)); then
+        mkdir -p "$b/symbols"
+        if [ -f "$b/bridge.elf" ]; then
+            gzip -c "$b/bridge.elf" > "$b/symbols/bridge.elf.gz" && rm -f "$b/bridge.elf"
+        fi
+        if [ -f "$b/bridge.map" ]; then
+            gzip -c "$b/bridge.map" > "$b/symbols/bridge.map.gz" && rm -f "$b/bridge.map"
+        fi
+    fi
+
+    after="$(du -sk "$b" | cut -f1)"
+    PRUNE_STATS[$v]="$(awk -v a="$before" -v b="$after" 'BEGIN {
+        printf "%.1fM -> %.1fM, freed %.1fM", a/1024, b/1024, (a-b)/1024 }')"
+    echo "   pruned: ${PRUNE_STATS[$v]}"
+    return 0
+}
+
 # Flash one variant through tools/flash.py (identity from by-id + MAC map),
 # retrying once on transient probe/connect errors only.
 declare -A FLASH_RESULT=()
@@ -151,6 +208,7 @@ flash_variant() {
     echo "== flash $v"
     if ((DRY_RUN)); then
         echo "   (dry-run) python3 tools/flash.py --variant $v --yes --capture $CAPTURE_SECONDS"
+        ((PRUNE)) && echo "   (dry-run) prune build_r_$v to bridge.bin/elf/map + flasher + sdkconfig + logs"
         FLASH_RESULT[$v]="dry-run"
         return 0
     fi
@@ -164,6 +222,7 @@ flash_variant() {
             FLASH_RESULT[$v]="ok"
             grep -q "transmit rate" "$REPO_ROOT/build_r_$v/boot_flash.log" 2>/dev/null \
                 && echo "   note: $(grep -o 'ESP-NOW transmit rate.*' "$REPO_ROOT/build_r_$v/boot_flash.log" | tail -1)"
+            prune_build "$v"
             return 0
         }
         # Refusals and identity mismatches are real errors: do not retry them.
@@ -191,7 +250,13 @@ set +u
 source "$IDF_ENV" >/dev/null 2>&1
 rc=$?
 set -u
-((rc == 0)) || die "failed to source $IDF_ENV"
+# The activation script returns non-zero when its optional "eim select" tail
+# step fails (e.g. inside a read-only sandbox), even though the environment is
+# fully set up. Judge success by idf.py being on PATH, and only report the
+# leftover exit status as a note.
+if ((rc != 0)); then
+    echo "note: $IDF_ENV returned $rc (optional tail step); checking the environment instead"
+fi
 command -v idf.py >/dev/null || die "idf.py not on PATH after sourcing $IDF_ENV"
 
 if ((DO_FLASH)) && (( ! DRY_RUN )); then
@@ -210,6 +275,11 @@ if ((failed == 0)) && ((DO_FLASH)); then
     for v in "${VARIANTS[@]}"; do
         flash_variant "$v" || { failed=1; break; }
     done
+elif ((failed == 0)) && ((DO_BUILD)) && (( ! DRY_RUN )); then
+    # --no-flash: the build is the deliverable, so prune it now.
+    for v in "${VARIANTS[@]}"; do
+        prune_build "$v"
+    done
 fi
 
 echo
@@ -218,6 +288,11 @@ printf '%-10s %-34s %s\n' "variant" "build" "flash"
 for v in "${VARIANTS[@]}"; do
     printf '%-10s %-34s %s\n' "$v" "${BUILD_RESULT[$v]:-skipped}" "${FLASH_RESULT[$v]:-skipped}"
 done
+if ((PRUNE)) && (( ! DRY_RUN )); then
+    for v in "${VARIANTS[@]}"; do
+        [ -n "${PRUNE_STATS[$v]:-}" ] && echo "pruned $v: ${PRUNE_STATS[$v]}"
+    done
+fi
 if ((failed)); then
     echo "RESULT: FAILED"
     exit 1
